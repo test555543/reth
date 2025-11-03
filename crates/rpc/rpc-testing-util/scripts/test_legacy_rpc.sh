@@ -130,6 +130,9 @@ rpc_call() {
         -H "Content-Type: application/json" \
         -d "{\"jsonrpc\":\"2.0\",\"method\":\"$method\",\"params\":$params,\"id\":1}")
 
+    # Sleep 1 second to avoid rate limiting on public legacy RPC endpoints
+    sleep 1
+
     echo "$response"
 }
 
