@@ -52,14 +52,36 @@ reth node \
 ### Test Testnet
 
 ```bash
-./test_legacy_rpc.sh http://localhost:8545 12241701
+# Use default RPC URL (http://localhost:8545)
+./test_legacy_rpc.sh testnet
+
+# Or specify custom RPC URL
+./test_legacy_rpc.sh testnet http://localhost:8545
 ```
 
 ### Test Mainnet
 
 ```bash
-./test_legacy_rpc.sh http://localhost:8545 42810021
+# Use default RPC URL (http://localhost:8545)
+./test_legacy_rpc.sh mainnet
+
+# Or specify custom RPC URL
+./test_legacy_rpc.sh mainnet http://your-reth-node:8545
 ```
+
+### Command Syntax
+
+```bash
+./test_legacy_rpc.sh <network> [reth_url]
+
+Arguments:
+  network   - Required: "mainnet" or "testnet"
+  reth_url  - Optional: RPC endpoint (default: http://localhost:8545)
+```
+
+**Note**: The script automatically sets the correct cutoff block based on the network:
+- **Testnet**: 12241701
+- **Mainnet**: 42810021
 
 ## What This Tests
 
@@ -237,16 +259,30 @@ Status: Normal for newly synced nodes
 
 ## Advanced Usage
 
-### Custom RPC Endpoint
+### Custom RPC Endpoint and Port
 ```bash
-./test_legacy_rpc.sh http://your-reth-node:8545 12241701
+# Test with custom port
+./test_legacy_rpc.sh testnet http://localhost:9545
+
+# Test remote node
+./test_legacy_rpc.sh mainnet http://your-reth-node.example.com:8545
+
+# Test with IP address
+./test_legacy_rpc.sh testnet http://192.168.1.100:8545
 ```
 
 ### Test Specific Block Range
-Edit the script variables:
+The script automatically calculates test blocks based on the cutoff block:
 ```bash
-LEGACY_BLOCK=$((CUTOFF_BLOCK - 1000))  # Adjust offset
-LOCAL_BLOCK=$((CUTOFF_BLOCK + 1000))   # Adjust offset
+LEGACY_BLOCK  = CUTOFF_BLOCK - 1000  # Tests legacy routing
+BOUNDARY_BLOCK = CUTOFF_BLOCK         # Tests exact cutoff
+LOCAL_BLOCK   = CUTOFF_BLOCK + 1000  # Tests local data
+```
+
+To adjust the test range, edit these values in the script:
+```bash
+LEGACY_BLOCK=$((CUTOFF_BLOCK - 1000))  # Change offset as needed
+LOCAL_BLOCK=$((CUTOFF_BLOCK + 1000))   # Change offset as needed
 ```
 
 ## Migration Validation Checklist

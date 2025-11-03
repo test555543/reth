@@ -1,22 +1,81 @@
 #!/bin/bash
 #
-# Legacy RPC Comprehensive Test Script
+# XLayer Legacy RPC Comprehensive Test Script
 #
-# This script tests all Legacy RPC functionality on a running Reth node
-# Usage: ./test_legacy_rpc.sh [reth_url] [cutoff_block]
+# This script tests all Legacy RPC functionality for XLayer's Erigon-to-Reth migration
 #
-# Example:
-#   ./test_legacy_rpc.sh http://localhost:8545 1000000
+# Usage: ./test_legacy_rpc.sh <network> [reth_url]
+#
+# Arguments:
+#   network   - Required: "mainnet" or "testnet"
+#   reth_url  - Optional: RPC endpoint (default: http://localhost:8545)
+#
+# Examples:
+#   ./test_legacy_rpc.sh testnet
+#   ./test_legacy_rpc.sh testnet http://localhost:8545
+#   ./test_legacy_rpc.sh mainnet http://your-reth-node:8545
 #
 
 set -e
 
 # ========================================
-# Configuration
+# XLayer Configuration
 # ========================================
 
-RETH_URL="${1:-http://localhost:8545}"
-CUTOFF_BLOCK="${2:-1000000}"
+# XLayer migration cutoff blocks
+TESTNET_LEGACY_CUTOFF_BLOCK="12241701"
+MAINNET_LEGACY_CUTOFF_BLOCK="42810021"
+
+# ========================================
+# Parse Arguments
+# ========================================
+
+NETWORK="${1}"
+RETH_URL="${2:-http://localhost:8545}"
+
+# Validate network parameter
+if [ -z "$NETWORK" ]; then
+    echo "❌ Error: Network type is required!"
+    echo ""
+    echo "Usage: $0 <network> [reth_url]"
+    echo ""
+    echo "Arguments:"
+    echo "  network   - Required: 'mainnet' or 'testnet'"
+    echo "  reth_url  - Optional: RPC endpoint (default: http://localhost:8545)"
+    echo ""
+    echo "Examples:"
+    echo "  $0 testnet"
+    echo "  $0 testnet http://localhost:8545"
+    echo "  $0 mainnet http://your-node:8545"
+    echo ""
+    exit 1
+fi
+
+# Set cutoff block based on network
+# Convert network name to lowercase for case-insensitive matching
+NETWORK_LOWER=$(echo "$NETWORK" | tr '[:upper:]' '[:lower:]')
+
+case "$NETWORK_LOWER" in
+    mainnet)
+        CUTOFF_BLOCK="$MAINNET_LEGACY_CUTOFF_BLOCK"
+        NETWORK_NAME="XLayer Mainnet"
+        LEGACY_RPC_URL="https://xlayerrpc.okx.com"
+        ;;
+    testnet)
+        CUTOFF_BLOCK="$TESTNET_LEGACY_CUTOFF_BLOCK"
+        NETWORK_NAME="XLayer Testnet"
+        LEGACY_RPC_URL="https://testrpc.xlayer.tech"
+        ;;
+    *)
+        echo "❌ Error: Invalid network type '${NETWORK}'"
+        echo ""
+        echo "Valid options:"
+        echo "  - mainnet  (Cutoff block: ${MAINNET_LEGACY_CUTOFF_BLOCK})"
+        echo "  - testnet  (Cutoff block: ${TESTNET_LEGACY_CUTOFF_BLOCK})"
+        echo ""
+        exit 1
+        ;;
+esac
 
 # Colors for output
 RED='\033[0;31m'
@@ -129,9 +188,22 @@ check_result_not_null() {
 
 log_section "Pre-flight Checks"
 
+echo ""
+echo "🌐 Network:      $NETWORK_NAME"
+echo "🔗 RPC URL:      $RETH_URL"
+echo "📦 Cutoff Block: $CUTOFF_BLOCK"
+echo "🔄 Legacy RPC:   $LEGACY_RPC_URL"
+echo ""
+
 log_info "Testing connection to Reth..."
 if ! curl -s "$RETH_URL" > /dev/null 2>&1; then
     log_error "Cannot connect to Reth at $RETH_URL"
+    echo ""
+    echo "💡 Tips:"
+    echo "   - Make sure Reth is running"
+    echo "   - Check if the RPC port is correct (default: 8545)"
+    echo "   - Verify firewall settings"
+    echo ""
     exit 1
 fi
 log_success "Connected to Reth at $RETH_URL"
@@ -141,23 +213,44 @@ CHAIN_ID=$(rpc_call "eth_chainId" "[]" | jq -r '.result')
 LATEST_BLOCK=$(rpc_call "eth_blockNumber" "[]" | jq -r '.result')
 LATEST_BLOCK_DEC=$((LATEST_BLOCK))
 
+# Validate chain ID
+EXPECTED_CHAIN_ID_MAINNET="0xc4"  # 196
+EXPECTED_CHAIN_ID_TESTNET="0xc3"  # 195
+
+if [ "$NETWORK_LOWER" = "mainnet" ] && [ "$CHAIN_ID" != "$EXPECTED_CHAIN_ID_MAINNET" ]; then
+    log_warning "Chain ID mismatch! Expected $EXPECTED_CHAIN_ID_MAINNET (mainnet), got $CHAIN_ID"
+    echo "   You might be connected to the wrong network!"
+elif [ "$NETWORK_LOWER" = "testnet" ] && [ "$CHAIN_ID" != "$EXPECTED_CHAIN_ID_TESTNET" ]; then
+    log_warning "Chain ID mismatch! Expected $EXPECTED_CHAIN_ID_TESTNET (testnet), got $CHAIN_ID"
+    echo "   You might be connected to the wrong network!"
+fi
+
 log_info "Chain ID: $CHAIN_ID"
 log_info "Latest Block: $LATEST_BLOCK ($LATEST_BLOCK_DEC)"
 log_info "Cutoff Block: $CUTOFF_BLOCK"
 
 # Calculate test block numbers
-LEGACY_BLOCK=$((CUTOFF_BLOCK - 1000))
-LOCAL_BLOCK=$((CUTOFF_BLOCK + 1000))
-BOUNDARY_BLOCK=$CUTOFF_BLOCK
+# XLayer: Use blocks around the migration cutoff point
+LEGACY_BLOCK=$((CUTOFF_BLOCK - 1000))  # Block before migration (should route to Erigon)
+LOCAL_BLOCK=$((CUTOFF_BLOCK + 1000))   # Block after migration (should use Reth)
+BOUNDARY_BLOCK=$CUTOFF_BLOCK           # Exact cutoff block
 
 LEGACY_BLOCK_HEX=$(printf "0x%x" $LEGACY_BLOCK)
 LOCAL_BLOCK_HEX=$(printf "0x%x" $LOCAL_BLOCK)
 BOUNDARY_BLOCK_HEX=$(printf "0x%x" $BOUNDARY_BLOCK)
 
 log_info "Test Blocks:"
-log_info "  Legacy Block:   $LEGACY_BLOCK_HEX ($LEGACY_BLOCK)"
-log_info "  Boundary Block: $BOUNDARY_BLOCK_HEX ($BOUNDARY_BLOCK)"
-log_info "  Local Block:    $LOCAL_BLOCK_HEX ($LOCAL_BLOCK)"
+log_info "  Legacy Block:   $LEGACY_BLOCK_HEX ($LEGACY_BLOCK) → Should route to Erigon"
+log_info "  Boundary Block: $BOUNDARY_BLOCK_HEX ($BOUNDARY_BLOCK) → Migration point"
+log_info "  Local Block:    $LOCAL_BLOCK_HEX ($LOCAL_BLOCK) → Should use Reth"
+
+# Validate that current block height is reasonable
+if [ $LATEST_BLOCK_DEC -lt $CUTOFF_BLOCK ]; then
+    log_error "Node's latest block ($LATEST_BLOCK_DEC) is below cutoff block ($CUTOFF_BLOCK)!"
+    echo "   This node hasn't synced past the migration point yet."
+    echo "   Some tests may fail or be skipped."
+    echo ""
+fi
 
 # ========================================
 # Phase 1: Basic Block Query Tests
@@ -653,10 +746,20 @@ fi
 echo ""
 
 # Final verdict
+echo ""
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo "📊 Test Configuration:"
+echo "   Network:      $NETWORK_NAME"
+echo "   RPC URL:      $RETH_URL"
+echo "   Cutoff Block: $CUTOFF_BLOCK"
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo ""
+
 if [ $FAILED_TESTS -eq 0 ]; then
     echo -e "${GREEN}╔════════════════════════════════════════╗${NC}"
     echo -e "${GREEN}║   ✓ ALL TESTS PASSED!                 ║${NC}"
     echo -e "${GREEN}║   Legacy RPC is working correctly!    ║${NC}"
+    echo -e "${GREEN}║   ${NETWORK_NAME} migration validated ✓    ║${NC}"
     echo -e "${GREEN}╚════════════════════════════════════════╝${NC}"
     exit 0
 else
@@ -664,6 +767,17 @@ else
     echo -e "${RED}║   ✗ SOME TESTS FAILED                  ║${NC}"
     echo -e "${RED}║   Please review the errors above       ║${NC}"
     echo -e "${RED}╚════════════════════════════════════════╝${NC}"
+    echo ""
+    echo "💡 Troubleshooting tips:"
+    echo "   1. Check if Reth was started with Legacy RPC parameters:"
+    echo "      --legacy-rpc-url \"$LEGACY_RPC_URL\""
+    echo "      --legacy-cutoff-block $CUTOFF_BLOCK"
+    echo ""
+    echo "   2. Verify network connectivity to legacy RPC endpoint"
+    echo ""
+    echo "   3. Check Reth logs for errors:"
+    echo "      docker logs <container_id> | grep -i legacy"
+    echo ""
     exit 1
 fi
 
