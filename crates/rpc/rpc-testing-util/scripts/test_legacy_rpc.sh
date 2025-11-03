@@ -1,20 +1,9 @@
 #!/bin/bash
 # Usage: ./test_legacy_rpc.sh <network> [reth_url]
 
-# Don't exit on error - we want to continue testing even if some tests fail
-# set -e
-
-# ========================================
-# XLayer Configuration
-# ========================================
-
 # XLayer migration cutoff blocks
 TESTNET_LEGACY_CUTOFF_BLOCK="12241701"
 MAINNET_LEGACY_CUTOFF_BLOCK="42810021"
-
-# ========================================
-# Parse Arguments
-# ========================================
 
 NETWORK="${1}"
 RETH_URL="${2:-http://localhost:8545}"
