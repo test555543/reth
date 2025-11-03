@@ -1,6 +1,4 @@
-//! Legacy RPC routing utilities
-//!
-//! Provides simple helpers to minimize code duplication when adding legacy routing logic.
+//! XLayer: Legacy RPC routing utilities
 
 use alloy_eips::BlockId;
 use alloy_rpc_types_eth::BlockNumberOrTag;
@@ -78,10 +76,6 @@ pub fn internal_rpc_err<E: std::fmt::Display>(e: E) -> ErrorObjectOwned {
 pub fn boxed_err_to_rpc(e: Box<dyn std::error::Error + Send + Sync>) -> ErrorObjectOwned {
     internal_rpc_err(e.to_string())
 }
-
-// ========================================
-// Routing Macros (Experimental)
-// ========================================
 
 /// Route a request by BlockNumberOrTag to legacy RPC if below cutoff
 #[macro_export]
@@ -197,10 +191,6 @@ mod tests {
         Arc::new(reth_rpc_eth_types::LegacyRpcClient::from_config(&config).unwrap())
     }
 
-    // ========================================
-    // Phase 1.1: Type Conversion Tests (Most Critical) ⭐
-    // ========================================
-
     #[test]
     fn test_convert_simple_types() {
         // Test primitive types
@@ -314,10 +304,6 @@ mod tests {
         );
     }
 
-    // ========================================
-    // Phase 1.2: Routing Logic Tests
-    // ========================================
-
     #[test]
     fn test_should_route_to_legacy_below_cutoff() {
         let client = create_test_client(1000000);
@@ -400,10 +386,6 @@ mod tests {
         // But not u64::MAX itself
         assert!(!should_route_to_legacy(Some(&client), BlockNumberOrTag::Number(u64::MAX)));
     }
-
-    // ========================================
-    // Error Handling Tests
-    // ========================================
 
     #[test]
     fn test_internal_rpc_err_preserves_message() {

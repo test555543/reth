@@ -311,7 +311,7 @@ where
         self.inner.clone().logs_for_filter(filter, limits).await
     }
 
-    /// Parse block range from filter for legacy routing logic
+    /// XLayer: Parse block range from filter for legacy routing logic
     fn parse_block_range(&self, filter: &Filter) -> RpcResult<(u64, u64)> {
         let from = match filter.block_option.get_from_block() {
             Some(alloy_rpc_types_eth::BlockNumberOrTag::Number(n)) => *n,

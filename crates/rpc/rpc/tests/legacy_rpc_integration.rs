@@ -1,9 +1,4 @@
-//! Integration tests for Legacy RPC routing
-//!
-//! These tests verify:
-//! - Basic routing logic with mock legacy RPC
-//! - Cross-boundary getLogs
-//! - Hash-based fallback
+//! XLayer: Integration tests for Legacy RPC routing
 
 use jsonrpsee::{
     core::client::ClientT,
@@ -17,10 +12,6 @@ use alloy_rpc_types_eth::{Block, BlockNumberOrTag, Filter, FilterBlockOption, Lo
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
-
-// ========================================
-// Mock Legacy RPC Server
-// ========================================
 
 /// Creates a mock legacy RPC server that responds to basic eth_ methods
 async fn create_mock_legacy_server() -> (ServerHandle, SocketAddr) {
@@ -143,10 +134,6 @@ async fn create_mock_legacy_server() -> (ServerHandle, SocketAddr) {
     (handle, addr)
 }
 
-// ========================================
-// Phase 1.4: Basic Routing Integration Tests
-// ========================================
-
 #[tokio::test]
 async fn test_legacy_client_creation() {
     // Start mock server
@@ -207,10 +194,6 @@ async fn test_legacy_client_get_transaction_by_hash() {
     assert!(tx.is_some());
     // Note: hash is computed from the transaction, not set directly
 }
-
-// ========================================
-// Phase 1.5: Cross-boundary getLogs Integration Tests
-// ========================================
 
 #[tokio::test]
 async fn test_crossboundary_get_logs() {
@@ -364,10 +347,6 @@ async fn test_filter_classification() {
     );
 }
 
-// ========================================
-// Phase 2.3: Hash-based Fallback Tests
-// ========================================
-
 #[tokio::test]
 async fn test_hash_based_query_fallback() {
     let (_handle, addr) = create_mock_legacy_server().await;
@@ -388,10 +367,6 @@ async fn test_hash_based_query_fallback() {
     let tx = result.unwrap();
     assert!(tx.is_some());
 }
-
-// ========================================
-// Phase 2.1: Error Handling Tests
-// ========================================
 
 #[tokio::test]
 async fn test_legacy_rpc_timeout() {
@@ -424,10 +399,6 @@ async fn test_invalid_legacy_url() {
     let result = LegacyRpcClient::from_config(&config);
     assert!(result.is_err());
 }
-
-// ========================================
-// Helper functions for testing
-// ========================================
 
 /// Create a test filter for a specific block range
 fn create_test_filter(from: u64, to: u64) -> Filter {
