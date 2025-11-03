@@ -10344,7 +10344,6 @@ dependencies = [
  "jsonrpsee-core",
  "jsonrpsee-types",
  "metrics",
- "parking_lot",
  "rand 0.9.2",
  "reqwest",
  "reth-chain-state",
