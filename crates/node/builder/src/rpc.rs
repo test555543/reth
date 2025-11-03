@@ -1155,6 +1155,7 @@ impl<'a, N: FullNodeComponents<Types: NodeTypes<ChainSpec: Hardforks + EthereumH
             .max_batch_size(self.config.max_batch_size)
             .pending_block_kind(self.config.pending_block_kind)
             .raw_tx_forwarder(self.config.raw_tx_forwarder)
+            .legacy_rpc_config(self.config.legacy_rpc_config.clone())
     }
 }
 
