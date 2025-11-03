@@ -1,22 +1,8 @@
 #!/bin/bash
-#
-# XLayer Legacy RPC Comprehensive Test Script
-#
-# This script tests all Legacy RPC functionality for XLayer's Erigon-to-Reth migration
-#
 # Usage: ./test_legacy_rpc.sh <network> [reth_url]
-#
-# Arguments:
-#   network   - Required: "mainnet" or "testnet"
-#   reth_url  - Optional: RPC endpoint (default: http://localhost:8545)
-#
-# Examples:
-#   ./test_legacy_rpc.sh testnet
-#   ./test_legacy_rpc.sh testnet http://localhost:8545
-#   ./test_legacy_rpc.sh mainnet http://your-reth-node:8545
-#
 
-set -e
+# Don't exit on error - we want to continue testing even if some tests fail
+# set -e
 
 # ========================================
 # XLayer Configuration
@@ -142,18 +128,20 @@ check_result() {
     if echo "$response" | jq -e '.error' > /dev/null 2>&1; then
         log_error "$test_name"
         echo "       Error: $(echo "$response" | jq -r '.error.message')"
+        echo "       Response: $(echo "$response" | jq -c .)"
         FAILED_TESTS=$((FAILED_TESTS + 1))
         FAILED_TEST_NAMES+=("$test_name")
-        return 1
+        return 0  # Return 0 to continue testing
     elif echo "$response" | jq -e '.result' > /dev/null 2>&1; then
         log_success "$test_name"
         PASSED_TESTS=$((PASSED_TESTS + 1))
         return 0
     else
         log_error "$test_name - Invalid response format"
+        echo "       Response: $(echo "$response" | jq -c .)"
         FAILED_TESTS=$((FAILED_TESTS + 1))
         FAILED_TEST_NAMES+=("$test_name")
-        return 1
+        return 0  # Return 0 to continue testing
     fi
 }
 
@@ -167,17 +155,19 @@ check_result_not_null() {
     if echo "$response" | jq -e '.error' > /dev/null 2>&1; then
         log_error "$test_name"
         echo "       Error: $(echo "$response" | jq -r '.error.message')"
+        echo "       Response: $(echo "$response" | jq -c .)"
         FAILED_TESTS=$((FAILED_TESTS + 1))
         FAILED_TEST_NAMES+=("$test_name")
-        return 1
+        return 0  # Return 0 to continue testing
     elif echo "$response" | jq -e '.result != null' > /dev/null 2>&1; then
         log_success "$test_name"
         PASSED_TESTS=$((PASSED_TESTS + 1))
         return 0
     else
         log_warning "$test_name - Result is null (may be expected)"
+        echo "       Response: $(echo "$response" | jq -c .)"
         SKIPPED_TESTS=$((SKIPPED_TESTS + 1))
-        return 2
+        return 0  # Return 0 to continue testing
     fi
 }
 
@@ -192,16 +182,18 @@ check_result_legacy_tolerant() {
     if echo "$response" | jq -e '.error' > /dev/null 2>&1; then
         error_msg=$(echo "$response" | jq -r '.error.message')
         log_warning "$test_name - $error_msg (legacy endpoint may not support this method)"
+        echo "       Response: $(echo "$response" | jq -c .)"
         SKIPPED_TESTS=$((SKIPPED_TESTS + 1))
-        return 2
+        return 0  # Return 0 to continue testing
     elif echo "$response" | jq -e '.result' > /dev/null 2>&1; then
         log_success "$test_name"
         PASSED_TESTS=$((PASSED_TESTS + 1))
         return 0
     else
         log_warning "$test_name - Invalid response format"
+        echo "       Response: $(echo "$response" | jq -c .)"
         SKIPPED_TESTS=$((SKIPPED_TESTS + 1))
-        return 2
+        return 0  # Return 0 to continue testing
     fi
 }
 
