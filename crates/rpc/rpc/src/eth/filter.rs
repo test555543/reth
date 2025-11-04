@@ -431,7 +431,7 @@ where
             // Determine routing strategy
             if to_block < cutoff_block {
                 // Pure legacy: all blocks are below cutoff
-                info!(target: "rpc::eth::legacy", from = from_block, to = to_block, "→ legacy");
+                info!(target: "rpc::eth::legacy", method = "eth_getLogs", from = from_block, to = to_block, "→ legacy");
                 return legacy_client
                     .get_logs(filter)
                     .await
@@ -441,7 +441,7 @@ where
                 // Fall through to local processing (no log needed for default behavior)
             } else {
                 // Hybrid: spans both legacy and local ranges
-                info!(target: "rpc::eth::legacy", from = from_block, to = to_block, "→ hybrid");
+                info!(target: "rpc::eth::legacy", method = "eth_getLogs", from = from_block, to = to_block, "→ hybrid");
                 // Split filter into legacy and local parts
                 let mut legacy_filter = filter.clone();
                 legacy_filter = legacy_filter.to_block(alloy_rpc_types_eth::BlockNumberOrTag::Number(cutoff_block - 1));

@@ -79,9 +79,9 @@ pub fn boxed_err_to_rpc(e: Box<dyn std::error::Error + Send + Sync>) -> ErrorObj
 /// Route a request by BlockNumberOrTag to legacy RPC if below cutoff
 #[macro_export]
 macro_rules! route_by_number {
-    ($self:ident, $number:ident, $legacy_call:expr, $local_expr:expr) => {{
+    ($method:literal, $self:ident, $number:ident, $legacy_call:expr, $local_expr:expr) => {{
         if $crate::helpers::should_route_to_legacy($self.legacy_rpc_client(), $number) {
-            tracing::info!(target: "rpc::eth::legacy", block = ?$number, "→ legacy");
+            tracing::info!(target: "rpc::eth::legacy", method = $method, block = ?$number, "→ legacy");
             let result = $legacy_call
                 .await
                 .map_err($crate::helpers::boxed_err_to_rpc)?;
@@ -95,9 +95,9 @@ macro_rules! route_by_number {
 /// Route a request by BlockId to legacy RPC if below cutoff
 #[macro_export]
 macro_rules! route_by_block_id {
-    ($self:ident, $block_id:ident, $legacy_call:expr, $local_expr:expr) => {{
+    ($method:literal, $self:ident, $block_id:ident, $legacy_call:expr, $local_expr:expr) => {{
         if $crate::helpers::should_route_block_id_to_legacy($self.legacy_rpc_client(), Some($block_id)) {
-            tracing::info!(target: "rpc::eth::legacy", block = ?$block_id, "→ legacy");
+            tracing::info!(target: "rpc::eth::legacy", method = $method, block = ?$block_id, "→ legacy");
             let result = $legacy_call
                 .await
                 .map_err($crate::helpers::boxed_err_to_rpc)?;
@@ -111,9 +111,9 @@ macro_rules! route_by_block_id {
 /// Route by optional BlockId (for state queries)
 #[macro_export]
 macro_rules! route_by_block_id_opt {
-    ($self:ident, $block_id:ident, $legacy_call:expr, $local_expr:expr) => {{
+    ($method:literal, $self:ident, $block_id:ident, $legacy_call:expr, $local_expr:expr) => {{
         if $crate::helpers::should_route_block_id_to_legacy($self.legacy_rpc_client(), $block_id) {
-            tracing::info!(target: "rpc::eth::legacy", block = ?$block_id, "→ legacy");
+            tracing::info!(target: "rpc::eth::legacy", method = $method, block = ?$block_id, "→ legacy");
             $legacy_call
                 .await
                 .map_err($crate::helpers::boxed_err_to_rpc)
@@ -126,11 +126,11 @@ macro_rules! route_by_block_id_opt {
 /// Try local first, then fallback to legacy (for hash-based queries)
 #[macro_export]
 macro_rules! try_local_then_legacy {
-    ($self:ident, $key:ident, $local_expr:expr, $legacy_call:expr) => {{
+    ($method:literal, $self:ident, $key:ident, $local_expr:expr, $legacy_call:expr) => {{
         let local_result = $local_expr;
         if local_result.is_none() {
             if let Some(_legacy_client) = $self.legacy_rpc_client() {
-                tracing::info!(target: "rpc::eth::legacy", key = ?$key, "→ legacy (fallback)");
+                tracing::info!(target: "rpc::eth::legacy", method = $method, key = ?$key, "→ legacy (fallback)");
                 let result = $legacy_call
                     .await
                     .map_err($crate::helpers::boxed_err_to_rpc)?;
