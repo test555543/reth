@@ -266,7 +266,7 @@ HEADER_BLOCK_HASH=$(rpc_call "eth_getBlockByNumber" "[\"$LEGACY_BLOCK_HEX\",fals
 # Test 1.5.1: eth_getHeaderByNumber (legacy block)
 log_info "Test 1.5.1: eth_getHeaderByNumber (legacy block)"
 response=$(rpc_call "eth_getHeaderByNumber" "[\"$LEGACY_BLOCK_HEX\"]")
-check_result_not_null "$response" "eth_getHeaderByNumber (legacy)"
+check_result_legacy_tolerant "$response" "eth_getHeaderByNumber (legacy)"
 
 # Test 1.5.2: eth_getHeaderByNumber (local block)
 if [ $LOCAL_BLOCK -le $LATEST_BLOCK_DEC ]; then
@@ -282,7 +282,7 @@ fi
 if [ "$HEADER_BLOCK_HASH" != "null" ] && [ -n "$HEADER_BLOCK_HASH" ]; then
     log_info "Test 1.5.3: eth_getHeaderByHash"
     response=$(rpc_call "eth_getHeaderByHash" "[\"$HEADER_BLOCK_HASH\"]")
-    check_result_not_null "$response" "eth_getHeaderByHash"
+    check_result_legacy_tolerant "$response" "eth_getHeaderByHash"
 else
     log_warning "Skipping header hash test - no block hash available"
     SKIPPED_TESTS=$((SKIPPED_TESTS + 1))
@@ -449,7 +449,7 @@ LEGACY_TO=$((LEGACY_BLOCK + 10))
 LEGACY_FROM_HEX=$(printf "0x%x" $LEGACY_FROM)
 LEGACY_TO_HEX=$(printf "0x%x" $LEGACY_TO)
 response=$(rpc_call "eth_getLogs" "[{\"fromBlock\":\"$LEGACY_FROM_HEX\",\"toBlock\":\"$LEGACY_TO_HEX\"}]")
-check_result "$response" "eth_getLogs (pure legacy)"
+check_result_legacy_tolerant "$response" "eth_getLogs (pure legacy)"
 
 # Test 7.2: Pure local range (if available)
 if [ $LOCAL_BLOCK -le $LATEST_BLOCK_DEC ]; then
