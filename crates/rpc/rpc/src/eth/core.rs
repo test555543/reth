@@ -315,10 +315,11 @@ pub struct EthApiInner<N: RpcNodeCore, Rpc: RpcConvert> {
     /// Configuration for pending block construction.
     pending_block_kind: PendingBlockKind,
 
-    /// Optional legacy RPC client for routing historical data.
-    legacy_rpc_client: Option<Arc<reth_rpc_eth_types::LegacyRpcClient>>,
     /// Timeout duration for `send_raw_transaction_sync` RPC method.
     send_raw_transaction_sync_timeout: Duration,
+
+    /// XLayer: Optional legacy RPC client for routing historical data.
+    pub(crate) legacy_rpc_client: Option<Arc<reth_rpc_eth_types::LegacyRpcClient>>,
 }
 
 impl<N, Rpc> EthApiInner<N, Rpc>
@@ -452,12 +453,6 @@ where
     #[inline]
     pub const fn blocking_task_pool(&self) -> &BlockingTaskPool {
         &self.blocking_task_pool
-    }
-
-    /// XLayer: Returns the legacy RPC client if configured.
-    #[inline]
-    pub fn legacy_rpc_client(&self) -> Option<&Arc<reth_rpc_eth_types::LegacyRpcClient>> {
-        self.legacy_rpc_client.as_ref()
     }
 
     /// Returns a handle to the EVM config.
