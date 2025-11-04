@@ -65,17 +65,17 @@ where
         if to_block < cutoff_block {
             // Pure legacy: all blocks are below cutoff
             info!(target: "rpc::eth::legacy", method = "eth_getLogs", from = from_block, to = to_block, "→ legacy");
-            let result = legacy_client
-                .get_logs(filter)
-                .await
-                .map_err(|e| internal_rpc_err(e));
-            return Some(result);
+            match reth_rpc_eth_api::helpers::exec_legacy("eth_getLogs", legacy_client.get_logs(filter)).await {
+                Ok(logs) => return Some(Ok(logs)),
+                Err(e) => return Some(Err(internal_rpc_err(e))),
+            }
         } else if from_block >= cutoff_block {
             // Pure local: all blocks are at or above cutoff
             // Return None to signal local processing
             return None;
         } else {
             // Hybrid: spans both legacy and local ranges
+            let start = std::time::Instant::now();
             info!(target: "rpc::eth::legacy", method = "eth_getLogs", from = from_block, to = to_block, "→ hybrid");
 
             // Split filter into legacy and local parts
@@ -99,10 +99,13 @@ where
                 Err(e) => return Some(Err(e)),
             };
 
+            let legacy_count = legacy_logs.len();
             let mut local_logs = match local_result {
                 Ok(logs) => logs,
                 Err(e) => return Some(Err(e.into())),
             };
+
+            let local_count = local_logs.len();
 
             // Merge and sort logs
             legacy_logs.append(&mut local_logs);
@@ -112,6 +115,9 @@ where
                     .then(a.transaction_index.cmp(&b.transaction_index))
                     .then(a.log_index.cmp(&b.log_index))
             });
+
+            info!(target: "rpc::eth::legacy", method = "eth_getLogs", elapsed_ms = %start.elapsed().as_millis(),
+                  legacy_logs = legacy_count, local_logs = local_count, total = legacy_logs.len(), "← hybrid");
 
             return Some(Ok(legacy_logs));
         }
