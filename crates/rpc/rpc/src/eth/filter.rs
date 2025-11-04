@@ -421,7 +421,7 @@ where
     async fn logs(&self, filter: Filter) -> RpcResult<Vec<Log>> {
         trace!(target: "rpc::eth", "Serving eth_getLogs");
 
-        // Check if legacy RPC routing is configured
+        // XLayer: Check if legacy RPC routing is configured
         if let Some(legacy_client) = self.inner.eth_api.legacy_rpc_client() {
             let cutoff_block = legacy_client.cutoff_block();
 
@@ -477,6 +477,7 @@ where
     }
 }
 
+// XLayer: Legacy RPC routing support
 impl<Eth> reth_rpc_eth_api::helpers::LegacyRpc for EthFilter<Eth>
 where
     Eth: reth_rpc_eth_api::helpers::LegacyRpc + EthApiTypes,

@@ -376,23 +376,15 @@ where
             BatchTxProcessor::new(components.pool().clone(), max_batch_size);
         task_spawner.spawn_critical("tx-batcher", Box::pin(processor));
 
-        // Initialize legacy RPC client if configured
+        // XLayer: Initialize legacy RPC client if configured
         let legacy_rpc_client = legacy_rpc_config.and_then(|config| {
             match reth_rpc_eth_types::LegacyRpcClient::from_config(&config) {
                 Ok(client) => {
-                    tracing::info!(
-                        cutoff_block = config.cutoff_block,
-                        endpoint = %config.endpoint,
-                        "Legacy RPC support initialized"
-                    );
+                    tracing::info!(cutoff = config.cutoff_block, endpoint = %config.endpoint, "Legacy RPC initialized");
                     Some(Arc::new(client))
                 }
                 Err(e) => {
-                    tracing::warn!(
-                        error = %e,
-                        endpoint = %config.endpoint,
-                        "Failed to initialize legacy RPC client, legacy support disabled"
-                    );
+                    tracing::warn!(error = %e, endpoint = %config.endpoint, "Legacy RPC init failed");
                     None
                 }
             }
@@ -472,7 +464,7 @@ where
         &self.blocking_task_pool
     }
 
-    /// Returns the legacy RPC client if configured.
+    /// XLayer: Returns the legacy RPC client if configured.
     #[inline]
     pub fn legacy_rpc_client(&self) -> Option<&Arc<reth_rpc_eth_types::LegacyRpcClient>> {
         self.legacy_rpc_client.as_ref()

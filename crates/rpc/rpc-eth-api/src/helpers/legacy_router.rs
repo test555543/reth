@@ -34,8 +34,6 @@ pub fn should_route_block_id_to_legacy(
 }
 
 /// Convert any value through serde JSON (for type system compatibility)
-///
-/// This is used to convert between `alloy_rpc_types_eth::Transaction` and `RpcTransaction<T::NetworkTypes>`
 #[inline]
 pub fn convert_via_serde<T, U>(value: T) -> Result<U, ErrorObjectOwned>
 where
