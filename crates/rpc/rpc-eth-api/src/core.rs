@@ -814,7 +814,8 @@ where
 
         if state_override.is_none() {
             if should_route_block_id_to_legacy(self.legacy_rpc_client(), block_number) {
-                tracing::trace!(target: "rpc::eth", ?block_number, "Routing to legacy RPC");
+                let cutoff = self.legacy_rpc_client().map(|c| c.cutoff_block()).unwrap_or(0);
+                tracing::info!(target: "rpc::eth::legacy", method = "eth_createAccessList", block_id = ?block_number, cutoff = cutoff, "→ legacy");
                 let tx_req = convert_via_serde(request)?;
                 let result = self.legacy_rpc_client().unwrap()
                     .create_access_list(tx_req, block_number)
@@ -913,9 +914,9 @@ where
         use crate::helpers::{boxed_err_to_rpc, convert_via_serde};
         trace!(target: "rpc::eth", ?block_count, ?newest_block, ?reward_percentiles, "Serving eth_feeHistory");
 
-        if let Some(_legacy_client) = self.legacy_rpc_client() {
-            tracing::trace!(target: "rpc::eth", "Routing to legacy RPC");
-            let result = self.legacy_rpc_client().unwrap()
+        if let Some(legacy_client) = self.legacy_rpc_client() {
+            tracing::info!(target: "rpc::eth::legacy", method = "eth_feeHistory", block_count = %block_count, newest = ?newest_block, cutoff = legacy_client.cutoff_block(), "→ legacy");
+            let result = legacy_client
                 .fee_history(block_count, newest_block, reward_percentiles)
                 .await
                 .map_err(boxed_err_to_rpc)?;
