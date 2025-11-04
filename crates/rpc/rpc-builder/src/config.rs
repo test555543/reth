@@ -6,7 +6,7 @@ use reth_rpc_layer::{JwtError, JwtSecret};
 use reth_rpc_server_types::RpcModuleSelection;
 use std::{net::SocketAddr, path::PathBuf};
 use tower::layer::util::Identity;
-use tracing::{debug, warn};
+use tracing::{debug, info, warn};
 
 use crate::{
     auth::AuthServerConfig, error::RpcError, IpcServerBuilder, RpcModuleConfig, RpcServerConfig,
