@@ -6,7 +6,7 @@ use reth_rpc_layer::{JwtError, JwtSecret};
 use reth_rpc_server_types::RpcModuleSelection;
 use std::{net::SocketAddr, path::PathBuf};
 use tower::layer::util::Identity;
-use tracing::{debug, info, warn};
+use tracing::{debug, warn};
 
 use crate::{
     auth::AuthServerConfig, error::RpcError, IpcServerBuilder, RpcModuleConfig, RpcServerConfig,
@@ -92,22 +92,12 @@ impl RethRpcServerConfig for RpcServerArgs {
     }
 
     fn eth_config(&self) -> EthConfig {
-        use reth_rpc_eth_types::LegacyRpcConfig;
-        use std::time::Duration;
-
-        // Build legacy RPC config if parameters are provided
-        let legacy_rpc_config = if let (Some(url), Some(cutoff)) =
-            (&self.legacy_rpc_url, self.legacy_cutoff_block)
-        {
-            let timeout = self.legacy_rpc_timeout.as_ref()
-                .and_then(|s| humantime::parse_duration(s).ok())
-                .unwrap_or(Duration::from_secs(30));
-
-            info!(target: "reth::cli", legacy_url = %url, cutoff = cutoff, timeout = ?timeout, "Legacy RPC routing enabled");
-            Some(LegacyRpcConfig::new(cutoff, url.clone(), timeout))
-        } else {
-            None
-        };
+        // XLayer: Build legacy RPC config from CLI arguments
+        let legacy_rpc_config = crate::xlayer_legacy::build_legacy_rpc_config(
+            self.legacy_rpc_url.as_ref(),
+            self.legacy_cutoff_block,
+            self.legacy_rpc_timeout.as_ref(),
+        );
 
         EthConfig::default()
             .max_tracing_requests(self.rpc_max_tracing_requests)

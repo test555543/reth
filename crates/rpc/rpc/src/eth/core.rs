@@ -244,16 +244,6 @@ where
     }
 }
 
-impl<N, Rpc> reth_rpc_eth_api::helpers::LegacyRpc for EthApi<N, Rpc>
-where
-    N: RpcNodeCore,
-    Rpc: RpcConvert,
-{
-    fn legacy_rpc_client(&self) -> Option<&Arc<reth_rpc_eth_types::LegacyRpcClient>> {
-        self.inner.legacy_rpc_client()
-    }
-}
-
 impl<N, Rpc> SpawnBlocking for EthApi<N, Rpc>
 where
     N: RpcNodeCore,
