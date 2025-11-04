@@ -99,18 +99,11 @@ impl RethRpcServerConfig for RpcServerArgs {
         let legacy_rpc_config = if let (Some(url), Some(cutoff)) =
             (&self.legacy_rpc_url, self.legacy_cutoff_block)
         {
-            // Parse timeout duration
             let timeout = self.legacy_rpc_timeout.as_ref()
                 .and_then(|s| humantime::parse_duration(s).ok())
                 .unwrap_or(Duration::from_secs(30));
 
-            debug!(target: "reth::cli",
-                legacy_url = %url,
-                cutoff_block = cutoff,
-                timeout = ?timeout,
-                "Legacy RPC routing enabled"
-            );
-
+            info!(target: "reth::cli", legacy_url = %url, cutoff = cutoff, timeout = ?timeout, "Legacy RPC routing enabled");
             Some(LegacyRpcConfig::new(cutoff, url.clone(), timeout))
         } else {
             None

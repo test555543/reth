@@ -782,7 +782,6 @@ where
         block_overrides: Option<Box<BlockOverrides>>,
     ) -> RpcResult<Bytes> {
         trace!(target: "rpc::eth", ?request, ?block_number, ?state_overrides, ?block_overrides, "Serving eth_call");
-
         Ok(EthCall::call(
             self,
             request,
@@ -811,7 +810,6 @@ where
         state_override: Option<StateOverride>,
     ) -> RpcResult<AccessListResult> {
         trace!(target: "rpc::eth", ?request, ?block_number, ?state_override, "Serving eth_createAccessList");
-
         Ok(EthCall::create_access_list_at(self, request, block_number, state_override).await?)
     }
 
@@ -823,7 +821,6 @@ where
         state_override: Option<StateOverride>,
     ) -> RpcResult<U256> {
         trace!(target: "rpc::eth", ?request, ?block_number, "Serving eth_estimateGas");
-
         Ok(EthCall::estimate_gas_at(
             self,
             request,
