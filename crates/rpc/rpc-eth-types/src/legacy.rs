@@ -369,6 +369,63 @@ impl LegacyRpcClient {
             .await
             .map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>)
     }
+
+    /// Forward eth_getHeaderByNumber to legacy RPC.
+    pub async fn get_header_by_number(
+        &self,
+        block_number: BlockNumberOrTag,
+    ) -> Result<Option<alloy_rpc_types_eth::Header>, Box<dyn std::error::Error + Send + Sync>> {
+        self.client
+            .request("eth_getHeaderByNumber", (block_number,))
+            .await
+            .map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>)
+    }
+
+    /// Forward eth_getHeaderByHash to legacy RPC.
+    pub async fn get_header_by_hash(
+        &self,
+        hash: BlockHash,
+    ) -> Result<Option<alloy_rpc_types_eth::Header>, Box<dyn std::error::Error + Send + Sync>> {
+        self.client
+            .request("eth_getHeaderByHash", (hash,))
+            .await
+            .map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>)
+    }
+
+    /// Forward eth_getRawTransactionByHash to legacy RPC.
+    pub async fn get_raw_transaction_by_hash(
+        &self,
+        hash: TxHash,
+    ) -> Result<Option<Bytes>, Box<dyn std::error::Error + Send + Sync>> {
+        self.client
+            .request("eth_getRawTransactionByHash", (hash,))
+            .await
+            .map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>)
+    }
+
+    /// Forward eth_getRawTransactionByBlockHashAndIndex to legacy RPC.
+    pub async fn get_raw_transaction_by_block_hash_and_index(
+        &self,
+        hash: BlockHash,
+        index: Index,
+    ) -> Result<Option<Bytes>, Box<dyn std::error::Error + Send + Sync>> {
+        self.client
+            .request("eth_getRawTransactionByBlockHashAndIndex", (hash, index))
+            .await
+            .map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>)
+    }
+
+    /// Forward eth_getRawTransactionByBlockNumberAndIndex to legacy RPC.
+    pub async fn get_raw_transaction_by_block_number_and_index(
+        &self,
+        block_number: BlockNumberOrTag,
+        index: Index,
+    ) -> Result<Option<Bytes>, Box<dyn std::error::Error + Send + Sync>> {
+        self.client
+            .request("eth_getRawTransactionByBlockNumberAndIndex", (block_number, index))
+            .await
+            .map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>)
+    }
 }
 
 

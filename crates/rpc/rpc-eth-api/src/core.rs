@@ -2,9 +2,8 @@
 //! the `eth_` namespace.
 use crate::{
     helpers::{EthApiSpec, EthBlocks, EthCall, EthFees, EthState, EthTransactions, FullEthApi},
-    route_by_block_id, route_by_block_id_opt, route_by_number, route_conditional_with_convert,
-    route_if_legacy_configured, try_local_then_legacy, RpcBlock, RpcHeader, RpcReceipt,
-    RpcTransaction,
+    route_by_block_id, route_by_block_id_opt, route_by_number, try_local_then_legacy, RpcBlock,
+    RpcHeader, RpcReceipt, RpcTransaction,
 };
 use alloy_dyn_abi::TypedData;
 use alloy_eips::{eip2930::AccessListResult, BlockId, BlockNumberOrTag};
@@ -495,17 +494,12 @@ where
     /// Handler for: `eth_getUncleCountByBlockHash`
     async fn block_uncles_count_by_hash(&self, hash: B256) -> RpcResult<Option<U256>> {
         trace!(target: "rpc::eth", ?hash, "Serving eth_getUncleCountByBlockHash");
-
-        try_local_then_legacy!(
-            self,
-            hash,
-            if let Some(block) = EthBlocks::rpc_block(self, hash.into(), false).await? {
-                Some(U256::from(block.uncles.len()))
-            } else {
-                None
-            },
-            self.legacy_rpc_client().unwrap().get_uncle_count_by_hash(hash)
-        )
+        // Layer2 doesn't produce uncle blocks, always return 0
+        if EthBlocks::rpc_block(self, hash.into(), false).await?.is_some() {
+            Ok(Some(U256::ZERO))
+        } else {
+            Ok(None)
+        }
     }
 
     /// Handler for: `eth_getUncleCountByBlockNumber`
@@ -514,17 +508,12 @@ where
         number: BlockNumberOrTag,
     ) -> RpcResult<Option<U256>> {
         trace!(target: "rpc::eth", ?number, "Serving eth_getUncleCountByBlockNumber");
-
-        route_by_number!(
-            self,
-            number,
-            self.legacy_rpc_client().unwrap().get_uncle_count_by_block_number(number),
-            if let Some(block) = self.block_by_number(number, false).await? {
-                Ok(Some(U256::from(block.uncles.len())))
-            } else {
-                Ok(None)
-            }
-        )
+        // Layer2 doesn't produce uncle blocks, always return 0
+        if self.block_by_number(number, false).await?.is_some() {
+            Ok(Some(U256::ZERO))
+        } else {
+            Ok(None)
+        }
     }
 
     /// Handler for: `eth_getBlockReceipts`
@@ -549,13 +538,8 @@ where
         index: Index,
     ) -> RpcResult<Option<RpcBlock<T::NetworkTypes>>> {
         trace!(target: "rpc::eth", ?hash, ?index, "Serving eth_getUncleByBlockHashAndIndex");
-
-        try_local_then_legacy!(
-            self,
-            hash,
-            EthBlocks::ommer_by_block_and_index(self, hash.into(), index).await?,
-            self.legacy_rpc_client().unwrap().get_uncle_by_block_hash_and_index(hash, index)
-        )
+        // Layer2 doesn't produce uncle blocks, always return None
+        Ok(None)
     }
 
     /// Handler for: `eth_getUncleByBlockNumberAndIndex`
@@ -565,19 +549,20 @@ where
         index: Index,
     ) -> RpcResult<Option<RpcBlock<T::NetworkTypes>>> {
         trace!(target: "rpc::eth", ?number, ?index, "Serving eth_getUncleByBlockNumberAndIndex");
-
-        route_by_number!(
-            self,
-            number,
-            self.legacy_rpc_client().unwrap().get_uncle_by_block_number_and_index(number, index),
-            Ok(EthBlocks::ommer_by_block_and_index(self, number.into(), index).await?)
-        )
+        // Layer2 doesn't produce uncle blocks, always return None
+        Ok(None)
     }
 
     /// Handler for: `eth_getRawTransactionByHash`
     async fn raw_transaction_by_hash(&self, hash: B256) -> RpcResult<Option<Bytes>> {
         trace!(target: "rpc::eth", ?hash, "Serving eth_getRawTransactionByHash");
-        Ok(EthTransactions::raw_transaction_by_hash(self, hash).await?)
+
+        try_local_then_legacy!(
+            self,
+            hash,
+            EthTransactions::raw_transaction_by_hash(self, hash).await?,
+            self.legacy_rpc_client().unwrap().get_raw_transaction_by_hash(hash)
+        )
     }
 
     /// Handler for: `eth_getTransactionByHash`
@@ -605,8 +590,13 @@ where
         index: Index,
     ) -> RpcResult<Option<Bytes>> {
         trace!(target: "rpc::eth", ?hash, ?index, "Serving eth_getRawTransactionByBlockHashAndIndex");
-        Ok(EthTransactions::raw_transaction_by_block_and_tx_index(self, hash.into(), index.into())
-            .await?)
+
+        try_local_then_legacy!(
+            self,
+            hash,
+            EthTransactions::raw_transaction_by_block_and_tx_index(self, hash.into(), index.into()).await?,
+            self.legacy_rpc_client().unwrap().get_raw_transaction_by_block_hash_and_index(hash, index)
+        )
     }
 
     /// Handler for: `eth_getTransactionByBlockHashAndIndex`
@@ -632,12 +622,18 @@ where
         index: Index,
     ) -> RpcResult<Option<Bytes>> {
         trace!(target: "rpc::eth", ?number, ?index, "Serving eth_getRawTransactionByBlockNumberAndIndex");
-        Ok(EthTransactions::raw_transaction_by_block_and_tx_index(
+
+        route_by_number!(
             self,
-            number.into(),
-            index.into(),
+            number,
+            self.legacy_rpc_client().unwrap().get_raw_transaction_by_block_number_and_index(number, index),
+            Ok(EthTransactions::raw_transaction_by_block_and_tx_index(
+                self,
+                number.into(),
+                index.into(),
+            )
+            .await?)
         )
-        .await?)
     }
 
     /// Handler for: `eth_getTransactionByBlockNumberAndIndex`
@@ -745,13 +741,25 @@ where
         block_number: BlockNumberOrTag,
     ) -> RpcResult<Option<RpcHeader<T::NetworkTypes>>> {
         trace!(target: "rpc::eth", ?block_number, "Serving eth_getHeaderByNumber");
-        Ok(EthBlocks::rpc_block_header(self, block_number.into()).await?)
+
+        route_by_number!(
+            self,
+            block_number,
+            self.legacy_rpc_client().unwrap().get_header_by_number(block_number),
+            Ok(EthBlocks::rpc_block_header(self, block_number.into()).await?)
+        )
     }
 
     /// Handler for: `eth_getHeaderByHash`
     async fn header_by_hash(&self, hash: B256) -> RpcResult<Option<RpcHeader<T::NetworkTypes>>> {
         trace!(target: "rpc::eth", ?hash, "Serving eth_getHeaderByHash");
-        Ok(EthBlocks::rpc_block_header(self, hash.into()).await?)
+
+        try_local_then_legacy!(
+            self,
+            hash,
+            EthBlocks::rpc_block_header(self, hash.into()).await?,
+            self.legacy_rpc_client().unwrap().get_header_by_hash(hash)
+        )
     }
 
     /// Handler for: `eth_simulateV1`
@@ -775,20 +783,13 @@ where
     ) -> RpcResult<Bytes> {
         trace!(target: "rpc::eth", ?request, ?block_number, ?state_overrides, ?block_overrides, "Serving eth_call");
 
-        route_conditional_with_convert!(
+        Ok(EthCall::call(
             self,
-            state_overrides.is_none() && block_overrides.is_none(),
-            block_number,
             request,
-            call,
-            Ok(EthCall::call(
-                self,
-                request,
-                block_number,
-                EvmOverrides::new(state_overrides, block_overrides),
-            )
-            .await?)
+            block_number,
+            EvmOverrides::new(state_overrides, block_overrides),
         )
+        .await?)
     }
 
     /// Handler for: `eth_callMany`
@@ -809,21 +810,7 @@ where
         block_number: Option<BlockId>,
         state_override: Option<StateOverride>,
     ) -> RpcResult<AccessListResult> {
-        use crate::helpers::{boxed_err_to_rpc, convert_via_serde, should_route_block_id_to_legacy};
         trace!(target: "rpc::eth", ?request, ?block_number, ?state_override, "Serving eth_createAccessList");
-
-        if state_override.is_none() {
-            if should_route_block_id_to_legacy(self.legacy_rpc_client(), block_number) {
-                let cutoff = self.legacy_rpc_client().map(|c| c.cutoff_block()).unwrap_or(0);
-                tracing::info!(target: "rpc::eth::legacy", method = "eth_createAccessList", block_id = ?block_number, cutoff = cutoff, "→ legacy");
-                let tx_req = convert_via_serde(request)?;
-                let result = self.legacy_rpc_client().unwrap()
-                    .create_access_list(tx_req, block_number)
-                    .await
-                    .map_err(boxed_err_to_rpc)?;
-                return convert_via_serde(result);
-            }
-        }
 
         Ok(EthCall::create_access_list_at(self, request, block_number, state_override).await?)
     }
@@ -837,31 +824,19 @@ where
     ) -> RpcResult<U256> {
         trace!(target: "rpc::eth", ?request, ?block_number, "Serving eth_estimateGas");
 
-        route_conditional_with_convert!(
+        Ok(EthCall::estimate_gas_at(
             self,
-            state_override.is_none(),
-            block_number,
             request,
-            estimate_gas,
-            Ok(EthCall::estimate_gas_at(
-                self,
-                request,
-                block_number.unwrap_or_default(),
-                state_override,
-            )
-            .await?)
+            block_number.unwrap_or_default(),
+            state_override,
         )
+        .await?)
     }
 
     /// Handler for: `eth_gasPrice`
     async fn gas_price(&self) -> RpcResult<U256> {
         trace!(target: "rpc::eth", "Serving eth_gasPrice");
-
-        route_if_legacy_configured!(
-            self,
-            self.legacy_rpc_client().unwrap().gas_price(),
-            Ok(EthFees::gas_price(self).await?)
-        )
+        Ok(EthFees::gas_price(self).await?)
     }
 
     /// Handler for: `eth_getAccount`
@@ -877,23 +852,13 @@ where
     /// Handler for: `eth_maxPriorityFeePerGas`
     async fn max_priority_fee_per_gas(&self) -> RpcResult<U256> {
         trace!(target: "rpc::eth", "Serving eth_maxPriorityFeePerGas");
-
-        route_if_legacy_configured!(
-            self,
-            self.legacy_rpc_client().unwrap().max_priority_fee_per_gas(),
-            Ok(EthFees::suggested_priority_fee(self).await?)
-        )
+        Ok(EthFees::suggested_priority_fee(self).await?)
     }
 
     /// Handler for: `eth_blobBaseFee`
     async fn blob_base_fee(&self) -> RpcResult<U256> {
         trace!(target: "rpc::eth", "Serving eth_blobBaseFee");
-
-        route_if_legacy_configured!(
-            self,
-            self.legacy_rpc_client().unwrap().blob_base_fee(),
-            Ok(EthFees::blob_base_fee(self).await?)
-        )
+        Ok(EthFees::blob_base_fee(self).await?)
     }
 
     // FeeHistory is calculated based on lazy evaluation of fees for historical blocks, and further
@@ -911,18 +876,7 @@ where
         newest_block: BlockNumberOrTag,
         reward_percentiles: Option<Vec<f64>>,
     ) -> RpcResult<FeeHistory> {
-        use crate::helpers::{boxed_err_to_rpc, convert_via_serde};
         trace!(target: "rpc::eth", ?block_count, ?newest_block, ?reward_percentiles, "Serving eth_feeHistory");
-
-        if let Some(legacy_client) = self.legacy_rpc_client() {
-            tracing::info!(target: "rpc::eth::legacy", method = "eth_feeHistory", block_count = %block_count, newest = ?newest_block, cutoff = legacy_client.cutoff_block(), "→ legacy");
-            let result = legacy_client
-                .fee_history(block_count, newest_block, reward_percentiles)
-                .await
-                .map_err(boxed_err_to_rpc)?;
-            return convert_via_serde(result);
-        }
-
         Ok(EthFees::fee_history(self, block_count.to(), newest_block, reward_percentiles).await?)
     }
 
@@ -999,19 +953,7 @@ where
         keys: Vec<JsonStorageKey>,
         block_number: Option<BlockId>,
     ) -> RpcResult<EIP1186AccountProofResponse> {
-        use crate::helpers::{boxed_err_to_rpc, convert_via_serde, should_route_block_id_to_legacy};
         trace!(target: "rpc::eth", ?address, ?keys, ?block_number, "Serving eth_getProof");
-
-        if should_route_block_id_to_legacy(self.legacy_rpc_client(), block_number) {
-            tracing::trace!(target: "rpc::eth", ?block_number, "Routing to legacy RPC");
-            let keys_b256: Vec<B256> = keys.iter().map(|k| k.as_b256()).collect();
-            let result = self.legacy_rpc_client().unwrap()
-                .get_proof(address, keys_b256, block_number)
-                .await
-                .map_err(boxed_err_to_rpc)?;
-            return convert_via_serde(result);
-        }
-
         Ok(EthState::get_proof(self, address, keys, block_number)?.await?)
     }
 

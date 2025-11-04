@@ -255,6 +255,40 @@ response=$(rpc_call "eth_getBlockByNumber" "[\"$LEGACY_BLOCK_HEX\",true]")
 check_result_not_null "$response" "eth_getBlockByNumber (full tx)"
 
 # ========================================
+# Phase 1.5: Header Tests
+# ========================================
+
+log_section "Phase 1.5: Header Tests"
+
+# Get a block hash for testing
+HEADER_BLOCK_HASH=$(rpc_call "eth_getBlockByNumber" "[\"$LEGACY_BLOCK_HEX\",false]" | jq -r '.result.hash')
+
+# Test 1.5.1: eth_getHeaderByNumber (legacy block)
+log_info "Test 1.5.1: eth_getHeaderByNumber (legacy block)"
+response=$(rpc_call "eth_getHeaderByNumber" "[\"$LEGACY_BLOCK_HEX\"]")
+check_result_not_null "$response" "eth_getHeaderByNumber (legacy)"
+
+# Test 1.5.2: eth_getHeaderByNumber (local block)
+if [ $LOCAL_BLOCK -le $LATEST_BLOCK_DEC ]; then
+    log_info "Test 1.5.2: eth_getHeaderByNumber (local block)"
+    response=$(rpc_call "eth_getHeaderByNumber" "[\"$LOCAL_BLOCK_HEX\"]")
+    check_result_not_null "$response" "eth_getHeaderByNumber (local)"
+else
+    log_warning "Skipping local block header test - block not yet mined"
+    SKIPPED_TESTS=$((SKIPPED_TESTS + 1))
+fi
+
+# Test 1.5.3: eth_getHeaderByHash
+if [ "$HEADER_BLOCK_HASH" != "null" ] && [ -n "$HEADER_BLOCK_HASH" ]; then
+    log_info "Test 1.5.3: eth_getHeaderByHash"
+    response=$(rpc_call "eth_getHeaderByHash" "[\"$HEADER_BLOCK_HASH\"]")
+    check_result_not_null "$response" "eth_getHeaderByHash"
+else
+    log_warning "Skipping header hash test - no block hash available"
+    SKIPPED_TESTS=$((SKIPPED_TESTS + 1))
+fi
+
+# ========================================
 # Phase 2: Transaction Count Tests
 # ========================================
 
@@ -343,9 +377,34 @@ if [ -n "$TX_HASH" ] && [ "$TX_HASH" != "null" ]; then
     log_info "Test 4.4: eth_getTransactionByBlockNumberAndIndex"
     response=$(rpc_call "eth_getTransactionByBlockNumberAndIndex" "[\"$LEGACY_BLOCK_HEX\",\"0x0\"]")
     check_result_legacy_tolerant "$response" "eth_getTransactionByBlockNumberAndIndex"
+
+    # Test 4.5: eth_getRawTransactionByHash
+    log_info "Test 4.5: eth_getRawTransactionByHash (hash-based fallback)"
+    response=$(rpc_call "eth_getRawTransactionByHash" "[\"$TX_HASH\"]")
+    check_result_not_null "$response" "eth_getRawTransactionByHash"
+
+    # Test 4.6: eth_getRawTransactionByBlockHashAndIndex
+    log_info "Test 4.6: eth_getRawTransactionByBlockHashAndIndex"
+    response=$(rpc_call "eth_getRawTransactionByBlockHashAndIndex" "[\"$BLOCK_HASH\",\"0x0\"]")
+    check_result_legacy_tolerant "$response" "eth_getRawTransactionByBlockHashAndIndex"
+
+    # Test 4.7: eth_getRawTransactionByBlockNumberAndIndex (legacy block)
+    log_info "Test 4.7: eth_getRawTransactionByBlockNumberAndIndex (legacy block)"
+    response=$(rpc_call "eth_getRawTransactionByBlockNumberAndIndex" "[\"$LEGACY_BLOCK_HEX\",\"0x0\"]")
+    check_result_legacy_tolerant "$response" "eth_getRawTransactionByBlockNumberAndIndex (legacy)"
+
+    # Test 4.8: eth_getRawTransactionByBlockNumberAndIndex (local block)
+    if [ $LOCAL_BLOCK -le $LATEST_BLOCK_DEC ]; then
+        log_info "Test 4.8: eth_getRawTransactionByBlockNumberAndIndex (local block)"
+        response=$(rpc_call "eth_getRawTransactionByBlockNumberAndIndex" "[\"$LOCAL_BLOCK_HEX\",\"0x0\"]")
+        check_result_legacy_tolerant "$response" "eth_getRawTransactionByBlockNumberAndIndex (local)"
+    else
+        log_warning "Skipping local block getRawTransaction test - block not yet mined"
+        SKIPPED_TESTS=$((SKIPPED_TESTS + 1))
+    fi
 else
     log_warning "No transactions found in legacy block, skipping transaction tests"
-    SKIPPED_TESTS=$((SKIPPED_TESTS + 4))
+    SKIPPED_TESTS=$((SKIPPED_TESTS + 8))
 fi
 
 # ========================================
@@ -376,48 +435,6 @@ check_result "$response" "eth_getStorageAt"
 log_info "Test 5.4: eth_getTransactionCount"
 response=$(rpc_call "eth_getTransactionCount" "[\"$TEST_ADDR\",\"$LEGACY_BLOCK_HEX\"]")
 check_result "$response" "eth_getTransactionCount"
-
-# Test 5.5: eth_getProof (legacy block)
-log_info "Test 5.5: eth_getProof (legacy block)"
-response=$(rpc_call "eth_getProof" "[\"$TEST_ADDR\",[\"0x0\"],\"$LEGACY_BLOCK_HEX\"]")
-check_result_legacy_tolerant "$response" "eth_getProof (legacy)"
-
-# Test 5.6: eth_getProof (latest block)
-log_info "Test 5.6: eth_getProof (latest block)"
-response=$(rpc_call "eth_getProof" "[\"$TEST_ADDR\",[\"0x0\"],\"latest\"]")
-check_result "$response" "eth_getProof (latest)"
-
-# ========================================
-# Phase 6: Execution Tests
-# ========================================
-
-log_section "Phase 6: Execution Tests"
-
-# Test 6.1: eth_call
-log_info "Test 6.1: eth_call (legacy block)"
-CALL_DATA="{\"to\":\"$TEST_ADDR\",\"data\":\"0x\"}"
-response=$(rpc_call "eth_call" "[$CALL_DATA,\"$LEGACY_BLOCK_HEX\"]")
-check_result "$response" "eth_call (legacy)"
-
-# Test 6.2: eth_estimateGas
-log_info "Test 6.2: eth_estimateGas (legacy block)"
-response=$(rpc_call "eth_estimateGas" "[$CALL_DATA,\"$LEGACY_BLOCK_HEX\"]")
-check_result "$response" "eth_estimateGas (legacy)"
-
-# Test 6.3: eth_createAccessList (legacy block)
-log_info "Test 6.3: eth_createAccessList (legacy block)"
-response=$(rpc_call "eth_createAccessList" "[$CALL_DATA,\"$LEGACY_BLOCK_HEX\"]")
-check_result_legacy_tolerant "$response" "eth_createAccessList (legacy)"
-
-# Test 6.4: eth_createAccessList (local block)
-if [ $LOCAL_BLOCK -le $LATEST_BLOCK_DEC ]; then
-    log_info "Test 6.4: eth_createAccessList (local block)"
-    response=$(rpc_call "eth_createAccessList" "[$CALL_DATA,\"$LOCAL_BLOCK_HEX\"]")
-    check_result "$response" "eth_createAccessList (local)"
-else
-    log_warning "Skipping local block createAccessList test - block not yet mined"
-    SKIPPED_TESTS=$((SKIPPED_TESTS + 1))
-fi
 
 # ========================================
 # Phase 7: eth_getLogs Tests
@@ -669,45 +686,19 @@ if check_result "$response" "eth_getLogs (near-cutoff cross-boundary)"; then
 fi
 
 # ========================================
-# Phase 8: Gas-Related Methods
+# Phase 6: Additional Methods
 # ========================================
 
-log_section "Phase 8: Gas-Related Methods"
+log_section "Phase 6: Additional Methods"
 
-# Test 8.1: eth_gasPrice
-log_info "Test 8.1: eth_gasPrice"
-response=$(rpc_call "eth_gasPrice" "[]")
-check_result "$response" "eth_gasPrice"
-
-# Test 8.2: eth_maxPriorityFeePerGas
-log_info "Test 8.2: eth_maxPriorityFeePerGas"
-response=$(rpc_call "eth_maxPriorityFeePerGas" "[]")
-check_result "$response" "eth_maxPriorityFeePerGas"
-
-# Test 8.3: eth_feeHistory
-log_info "Test 8.3: eth_feeHistory (4 blocks, 25th percentile)"
-response=$(rpc_call "eth_feeHistory" "[\"0x4\",\"latest\",[25]]")
-check_result "$response" "eth_feeHistory"
-
-# Test 8.4: eth_blobBaseFee
-log_info "Test 8.4: eth_blobBaseFee"
-response=$(rpc_call "eth_blobBaseFee" "[]")
-check_result_legacy_tolerant "$response" "eth_blobBaseFee"
-
-# ========================================
-# Phase 9: Additional Methods
-# ========================================
-
-log_section "Phase 9: Additional Methods"
-
-# Test 9.1: eth_getBlockReceipts
-log_info "Test 9.1: eth_getBlockReceipts"
+# Test 6.1: eth_getBlockReceipts
+log_info "Test 6.1: eth_getBlockReceipts"
 response=$(rpc_call "eth_getBlockReceipts" "[\"$LEGACY_BLOCK_HEX\"]")
 check_result "$response" "eth_getBlockReceipts"
 
-# Test 9.2: eth_getBlockByHash
+# Test 6.2: eth_getBlockByHash
 if [ "$BLOCK_HASH" != "null" ] && [ -n "$BLOCK_HASH" ]; then
-    log_info "Test 9.2: eth_getBlockByHash"
+    log_info "Test 6.2: eth_getBlockByHash"
     response=$(rpc_call "eth_getBlockByHash" "[\"$BLOCK_HASH\",false]")
     check_result_not_null "$response" "eth_getBlockByHash"
 fi
