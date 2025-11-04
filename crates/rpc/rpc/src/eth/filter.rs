@@ -17,8 +17,8 @@ use jsonrpsee::{core::RpcResult, server::IdProvider};
 use reth_errors::ProviderError;
 use reth_primitives_traits::{NodePrimitives, SealedHeader};
 use reth_rpc_eth_api::{
-    EngineEthFilter, EthApiTypes, EthFilterApiServer, FullEthApiTypes, QueryLimits, RpcConvert,
-    RpcNodeCoreExt, RpcTransaction,
+    helpers::internal_rpc_err, EngineEthFilter, EthApiTypes, EthFilterApiServer, FullEthApiTypes,
+    QueryLimits, RpcConvert, RpcNodeCoreExt, RpcTransaction,
 };
 use reth_rpc_eth_types::{
     logs_utils::{self, append_matching_block_logs, ProviderOrBlock},
@@ -44,7 +44,7 @@ use tokio::{
     sync::{mpsc::Receiver, oneshot, Mutex},
     time::MissedTickBehavior,
 };
-use tracing::{debug, error, trace};
+use tracing::{debug, error, info, trace};
 
 impl<Eth> EngineEthFilter for EthFilter<Eth>
 where
@@ -431,18 +431,18 @@ where
             // Determine routing strategy
             if to_block < cutoff_block {
                 // Pure legacy: all blocks are below cutoff
-                trace!(target: "rpc::eth", ?from_block, ?to_block, ?cutoff_block, "Routing to legacy RPC (pure)");
+                info!(target: "rpc::eth", from=from_block, to=to_block, cutoff_block=cutoff_block, "Routing to legacy RPC (pure)");
                 return legacy_client
                     .get_logs(filter)
                     .await
-                    .map_err(|_| jsonrpsee::types::error::ErrorCode::InternalError.into());
+                    .map_err(|e| internal_rpc_err(e));
             } else if from_block >= cutoff_block {
                 // Pure local: all blocks are at or above cutoff
-                trace!(target: "rpc::eth", ?from_block, ?to_block, ?cutoff_block, "Processing locally (pure)");
+                info!(target: "rpc::eth", from=from_block, to=to_block, cutoff_block=cutoff_block, "Processing locally (pure)");
                 // Fall through to local processing
             } else {
                 // Hybrid: spans both legacy and local ranges
-                trace!(target: "rpc::eth", ?from_block, ?to_block, ?cutoff_block, "Hybrid query: splitting and merging");
+                info!(target: "rpc::eth", from=from_block, to=to_block, cutoff_block=cutoff_block, "Hybrid query: splitting and merging");
 
                 // Split filter into legacy and local parts
                 let mut legacy_filter = filter.clone();
@@ -460,7 +460,7 @@ where
                     async { self.logs_for_filter(local_filter, self.inner.query_limits).await }
                 );
 
-                let mut legacy_logs = legacy_result.map_err(|_| jsonrpsee::types::error::ErrorCode::InternalError)?;
+                let mut legacy_logs = legacy_result.map_err(|e| internal_rpc_err(e))?;
                 let mut local_logs = local_result?;
 
                 // Merge and sort logs

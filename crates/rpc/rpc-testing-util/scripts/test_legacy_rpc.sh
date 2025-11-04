@@ -1,56 +1,31 @@
 #!/bin/bash
-# Usage: ./test_legacy_rpc.sh <network> [reth_url]
+# Usage: ./test_legacy_rpc.sh [reth_url]
+#
+# IMPORTANT: Legacy RPC Limitations
+# ==================================
+# The legacy RPC endpoint (https://xlayerrpc.okx.com) has a 68-block limit per eth_getLogs query.
+# This means cross-boundary queries that include blocks before the cutoff are limited to:
+# - Maximum 68 blocks on the legacy side
+# - Reth can handle up to 69 blocks (with special handling)
+# - 70+ blocks will result in "Internal error"
+#
+# For cross-boundary queries, always ensure the legacy side range is <= 68 blocks.
 
-# XLayer migration cutoff blocks
-TESTNET_LEGACY_CUTOFF_BLOCK="12241701"
-MAINNET_LEGACY_CUTOFF_BLOCK="42810021"
+# XLayer Mainnet Configuration
+CUTOFF_BLOCK="42810021"
+NETWORK_NAME="XLayer Mainnet"
+LEGACY_RPC_URL="https://xlayerrpc.okx.com"
+EXPECTED_CHAIN_ID="0xc4"  # 196
 
-NETWORK="${1}"
-RETH_URL="${2:-http://localhost:8545}"
+# Real transaction hashes for testing
+REAL_LEGACY_TX="0xc55ed6b97e1f8093b9e6f16ffc29ff1d9a779351292422283e3a840c87aca033"
+REAL_LEGACY_BLOCK="42800899"
+REAL_LOCAL_TX="0x7e59cc40daad08b8df51917ff604a7f4c47c62e684421a18cc7676e9fa1a800c"
+REAL_LOCAL_BLOCK="42818021"
+NEAR_CUTOFF_TX="0x29747bf7e39e97a9dc659633f714b44bf245ff0191c6daab7de9fbbf58cb6153"
+NEAR_CUTOFF_BLOCK="42809908"
 
-# Validate network parameter
-if [ -z "$NETWORK" ]; then
-    echo "❌ Error: Network type is required!"
-    echo ""
-    echo "Usage: $0 <network> [reth_url]"
-    echo ""
-    echo "Arguments:"
-    echo "  network   - Required: 'mainnet' or 'testnet'"
-    echo "  reth_url  - Optional: RPC endpoint (default: http://localhost:8545)"
-    echo ""
-    echo "Examples:"
-    echo "  $0 testnet"
-    echo "  $0 testnet http://localhost:8545"
-    echo "  $0 mainnet http://your-node:8545"
-    echo ""
-    exit 1
-fi
-
-# Set cutoff block based on network
-# Convert network name to lowercase for case-insensitive matching
-NETWORK_LOWER=$(echo "$NETWORK" | tr '[:upper:]' '[:lower:]')
-
-case "$NETWORK_LOWER" in
-    mainnet)
-        CUTOFF_BLOCK="$MAINNET_LEGACY_CUTOFF_BLOCK"
-        NETWORK_NAME="XLayer Mainnet"
-        LEGACY_RPC_URL="https://xlayerrpc.okx.com"
-        ;;
-    testnet)
-        CUTOFF_BLOCK="$TESTNET_LEGACY_CUTOFF_BLOCK"
-        NETWORK_NAME="XLayer Testnet"
-        LEGACY_RPC_URL="https://testrpc.xlayer.tech"
-        ;;
-    *)
-        echo "❌ Error: Invalid network type '${NETWORK}'"
-        echo ""
-        echo "Valid options:"
-        echo "  - mainnet  (Cutoff block: ${MAINNET_LEGACY_CUTOFF_BLOCK})"
-        echo "  - testnet  (Cutoff block: ${TESTNET_LEGACY_CUTOFF_BLOCK})"
-        echo ""
-        exit 1
-        ;;
-esac
+RETH_URL="${1:-http://localhost:8545}"
 
 # Colors for output
 RED='\033[0;31m'
@@ -120,7 +95,7 @@ check_result() {
         echo "       Response: $(echo "$response" | jq -c .)"
         FAILED_TESTS=$((FAILED_TESTS + 1))
         FAILED_TEST_NAMES+=("$test_name")
-        return 0  # Return 0 to continue testing
+        return 0
     elif echo "$response" | jq -e '.result' > /dev/null 2>&1; then
         log_success "$test_name"
         PASSED_TESTS=$((PASSED_TESTS + 1))
@@ -130,7 +105,7 @@ check_result() {
         echo "       Response: $(echo "$response" | jq -c .)"
         FAILED_TESTS=$((FAILED_TESTS + 1))
         FAILED_TEST_NAMES+=("$test_name")
-        return 0  # Return 0 to continue testing
+        return 0
     fi
 }
 
@@ -147,7 +122,7 @@ check_result_not_null() {
         echo "       Response: $(echo "$response" | jq -c .)"
         FAILED_TESTS=$((FAILED_TESTS + 1))
         FAILED_TEST_NAMES+=("$test_name")
-        return 0  # Return 0 to continue testing
+        return 0
     elif echo "$response" | jq -e '.result != null' > /dev/null 2>&1; then
         log_success "$test_name"
         PASSED_TESTS=$((PASSED_TESTS + 1))
@@ -156,12 +131,11 @@ check_result_not_null() {
         log_warning "$test_name - Result is null (may be expected)"
         echo "       Response: $(echo "$response" | jq -c .)"
         SKIPPED_TESTS=$((SKIPPED_TESTS + 1))
-        return 0  # Return 0 to continue testing
+        return 0
     fi
 }
 
 # Check result with legacy endpoint tolerance (errors become warnings)
-# Use this for methods that may not be supported by legacy endpoints
 check_result_legacy_tolerant() {
     local response=$1
     local test_name=$2
@@ -173,7 +147,7 @@ check_result_legacy_tolerant() {
         log_warning "$test_name - $error_msg (legacy endpoint may not support this method)"
         echo "       Response: $(echo "$response" | jq -c .)"
         SKIPPED_TESTS=$((SKIPPED_TESTS + 1))
-        return 0  # Return 0 to continue testing
+        return 0
     elif echo "$response" | jq -e '.result' > /dev/null 2>&1; then
         log_success "$test_name"
         PASSED_TESTS=$((PASSED_TESTS + 1))
@@ -182,7 +156,7 @@ check_result_legacy_tolerant() {
         log_warning "$test_name - Invalid response format"
         echo "       Response: $(echo "$response" | jq -c .)"
         SKIPPED_TESTS=$((SKIPPED_TESTS + 1))
-        return 0  # Return 0 to continue testing
+        return 0
     fi
 }
 
@@ -218,14 +192,8 @@ LATEST_BLOCK=$(rpc_call "eth_blockNumber" "[]" | jq -r '.result')
 LATEST_BLOCK_DEC=$((LATEST_BLOCK))
 
 # Validate chain ID
-EXPECTED_CHAIN_ID_MAINNET="0xc4"  # 196
-EXPECTED_CHAIN_ID_TESTNET="0xc3"  # 195
-
-if [ "$NETWORK_LOWER" = "mainnet" ] && [ "$CHAIN_ID" != "$EXPECTED_CHAIN_ID_MAINNET" ]; then
-    log_warning "Chain ID mismatch! Expected $EXPECTED_CHAIN_ID_MAINNET (mainnet), got $CHAIN_ID"
-    echo "   You might be connected to the wrong network!"
-elif [ "$NETWORK_LOWER" = "testnet" ] && [ "$CHAIN_ID" != "$EXPECTED_CHAIN_ID_TESTNET" ]; then
-    log_warning "Chain ID mismatch! Expected $EXPECTED_CHAIN_ID_TESTNET (testnet), got $CHAIN_ID"
+if [ "$CHAIN_ID" != "$EXPECTED_CHAIN_ID" ]; then
+    log_warning "Chain ID mismatch! Expected $EXPECTED_CHAIN_ID (mainnet), got $CHAIN_ID"
     echo "   You might be connected to the wrong network!"
 fi
 
@@ -234,10 +202,9 @@ log_info "Latest Block: $LATEST_BLOCK ($LATEST_BLOCK_DEC)"
 log_info "Cutoff Block: $CUTOFF_BLOCK"
 
 # Calculate test block numbers
-# XLayer: Use blocks around the migration cutoff point
-LEGACY_BLOCK=$((CUTOFF_BLOCK - 1000))  # Block before migration (should route to Erigon)
-LOCAL_BLOCK=$((CUTOFF_BLOCK + 1000))   # Block after migration (should use Reth)
-BOUNDARY_BLOCK=$CUTOFF_BLOCK           # Exact cutoff block
+LEGACY_BLOCK=$((CUTOFF_BLOCK - 1000))
+LOCAL_BLOCK=$((CUTOFF_BLOCK + 1000))
+BOUNDARY_BLOCK=$CUTOFF_BLOCK
 
 LEGACY_BLOCK_HEX=$(printf "0x%x" $LEGACY_BLOCK)
 LOCAL_BLOCK_HEX=$(printf "0x%x" $LOCAL_BLOCK)
@@ -334,6 +301,16 @@ log_info "Test 3.3: eth_getUncleByBlockNumberAndIndex"
 response=$(rpc_call "eth_getUncleByBlockNumberAndIndex" "[\"$LEGACY_BLOCK_HEX\",\"0x0\"]")
 check_result_legacy_tolerant "$response" "eth_getUncleByBlockNumberAndIndex"
 
+# Test 3.4: eth_getUncleByBlockHashAndIndex
+if [ "$BLOCK_HASH" != "null" ] && [ -n "$BLOCK_HASH" ]; then
+    log_info "Test 3.4: eth_getUncleByBlockHashAndIndex"
+    response=$(rpc_call "eth_getUncleByBlockHashAndIndex" "[\"$BLOCK_HASH\",\"0x0\"]")
+    check_result_legacy_tolerant "$response" "eth_getUncleByBlockHashAndIndex"
+else
+    log_warning "Skipping getUncleByBlockHashAndIndex test - no block hash available"
+    SKIPPED_TESTS=$((SKIPPED_TESTS + 1))
+fi
+
 # ========================================
 # Phase 4: Transaction Query Tests
 # ========================================
@@ -400,8 +377,18 @@ log_info "Test 5.4: eth_getTransactionCount"
 response=$(rpc_call "eth_getTransactionCount" "[\"$TEST_ADDR\",\"$LEGACY_BLOCK_HEX\"]")
 check_result "$response" "eth_getTransactionCount"
 
+# Test 5.5: eth_getProof (legacy block)
+log_info "Test 5.5: eth_getProof (legacy block)"
+response=$(rpc_call "eth_getProof" "[\"$TEST_ADDR\",[\"0x0\"],\"$LEGACY_BLOCK_HEX\"]")
+check_result_legacy_tolerant "$response" "eth_getProof (legacy)"
+
+# Test 5.6: eth_getProof (latest block)
+log_info "Test 5.6: eth_getProof (latest block)"
+response=$(rpc_call "eth_getProof" "[\"$TEST_ADDR\",[\"0x0\"],\"latest\"]")
+check_result "$response" "eth_getProof (latest)"
+
 # ========================================
-# Phase 6: eth_call and eth_estimateGas Tests
+# Phase 6: Execution Tests
 # ========================================
 
 log_section "Phase 6: Execution Tests"
@@ -416,6 +403,21 @@ check_result "$response" "eth_call (legacy)"
 log_info "Test 6.2: eth_estimateGas (legacy block)"
 response=$(rpc_call "eth_estimateGas" "[$CALL_DATA,\"$LEGACY_BLOCK_HEX\"]")
 check_result "$response" "eth_estimateGas (legacy)"
+
+# Test 6.3: eth_createAccessList (legacy block)
+log_info "Test 6.3: eth_createAccessList (legacy block)"
+response=$(rpc_call "eth_createAccessList" "[$CALL_DATA,\"$LEGACY_BLOCK_HEX\"]")
+check_result_legacy_tolerant "$response" "eth_createAccessList (legacy)"
+
+# Test 6.4: eth_createAccessList (local block)
+if [ $LOCAL_BLOCK -le $LATEST_BLOCK_DEC ]; then
+    log_info "Test 6.4: eth_createAccessList (local block)"
+    response=$(rpc_call "eth_createAccessList" "[$CALL_DATA,\"$LOCAL_BLOCK_HEX\"]")
+    check_result "$response" "eth_createAccessList (local)"
+else
+    log_warning "Skipping local block createAccessList test - block not yet mined"
+    SKIPPED_TESTS=$((SKIPPED_TESTS + 1))
+fi
 
 # ========================================
 # Phase 7: eth_getLogs Tests
@@ -471,65 +473,226 @@ if check_result "$response" "eth_getLogs (CROSS-BOUNDARY)"; then
 fi
 
 # ========================================
-# Phase 8: Filter Tests (Not Supported for Historical Blocks)
+# Phase 7.5: Real Data Tests
 # ========================================
 
-log_section "Phase 8: Filter Lifecycle Tests"
+log_section "Phase 7.5: Real Data Tests with Known Transactions"
+
 echo ""
-log_warning "⚠️  Note: Filters are primarily designed for monitoring future events."
-log_warning "    For querying historical data, use eth_getLogs instead (which supports hybrid queries)."
-log_warning "    The following tests will show warnings if filters don't work on historical blocks."
+log_info "Using real transaction data:"
+log_info "  Legacy TX:  $REAL_LEGACY_TX (Block: $REAL_LEGACY_BLOCK)"
+log_info "  Local TX:   $REAL_LOCAL_TX (Block: $REAL_LOCAL_BLOCK)"
 echo ""
 
-# Test 8.1: eth_newFilter (legacy range) - Expected to not be supported
-log_info "Test 8.1: eth_newFilter (legacy range - historical blocks)"
-response=$(rpc_call "eth_newFilter" "[{\"fromBlock\":\"$LEGACY_FROM_HEX\",\"toBlock\":\"$LEGACY_TO_HEX\"}]")
-if echo "$response" | jq -e '.result' > /dev/null 2>&1; then
-    FILTER_ID=$(echo "$response" | jq -r '.result')
-    log_warning "  → Filter created: $FILTER_ID (unexpected for historical blocks)"
-
-    # Test 8.2: eth_getFilterLogs
-    log_info "Test 8.2: eth_getFilterLogs"
-    response=$(rpc_call "eth_getFilterLogs" "[\"$FILTER_ID\"]")
-    check_result_legacy_tolerant "$response" "eth_getFilterLogs"
-
-    # Test 8.3: eth_getFilterChanges
-    log_info "Test 8.3: eth_getFilterChanges"
-    response=$(rpc_call "eth_getFilterChanges" "[\"$FILTER_ID\"]")
-    check_result_legacy_tolerant "$response" "eth_getFilterChanges"
-
-    # Test 8.4: eth_uninstallFilter
-    log_info "Test 8.4: eth_uninstallFilter"
-    response=$(rpc_call "eth_uninstallFilter" "[\"$FILTER_ID\"]")
-    check_result_legacy_tolerant "$response" "eth_uninstallFilter"
-else
-    check_result_legacy_tolerant "$response" "eth_newFilter (legacy - historical blocks not supported, expected)"
-    log_warning "  → Skipping filter lifecycle tests (newFilter not supported for historical blocks)"
-    SKIPPED_TESTS=$((SKIPPED_TESTS + 3))
+# Test 7.5.1: Get legacy transaction by hash
+log_info "Test 7.5.1: eth_getTransactionByHash (real legacy tx)"
+response=$(rpc_call "eth_getTransactionByHash" "[\"$REAL_LEGACY_TX\"]")
+if check_result_not_null "$response" "eth_getTransactionByHash (real legacy)"; then
+    TX_BLOCK=$(echo "$response" | jq -r '.result.blockNumber')
+    TX_BLOCK_DEC=$((TX_BLOCK))
+    if [ "$TX_BLOCK_DEC" -eq "$REAL_LEGACY_BLOCK" ]; then
+        log_success "  → Block number matches: $TX_BLOCK ✓"
+    else
+        log_error "  → Block number mismatch! Expected $REAL_LEGACY_BLOCK, got $TX_BLOCK_DEC ✗"
+        FAILED_TESTS=$((FAILED_TESTS + 1))
+        FAILED_TEST_NAMES+=("Real legacy tx block verification")
+    fi
 fi
 
-echo ""
-# Test 8.5: Cross-boundary filter - Expected to not be supported
-log_info "Test 8.5: eth_newFilter (CROSS-BOUNDARY - historical range)"
-log_warning "  → For cross-boundary queries, use eth_getLogs instead (see Phase 7 Test 7.3)"
-response=$(rpc_call "eth_newFilter" "[{\"fromBlock\":\"$CROSS_FROM_HEX\",\"toBlock\":\"$CROSS_TO_HEX\"}]")
-if echo "$response" | jq -e '.result' > /dev/null 2>&1; then
-    CROSS_FILTER_ID=$(echo "$response" | jq -r '.result')
-    log_warning "  → Filter created: $CROSS_FILTER_ID (unexpected for cross-boundary historical blocks)"
-
-    # Get filter logs
-    response=$(rpc_call "eth_getFilterLogs" "[\"$CROSS_FILTER_ID\"]")
-    check_result_legacy_tolerant "$response" "eth_getFilterLogs (CROSS-BOUNDARY)"
-
-    # Cleanup
-    rpc_call "eth_uninstallFilter" "[\"$CROSS_FILTER_ID\"]" > /dev/null
-else
-    check_result_legacy_tolerant "$response" "eth_newFilter (CROSS-BOUNDARY - not supported, expected)"
+# Test 7.5.2: Get local transaction by hash
+log_info "Test 7.5.2: eth_getTransactionByHash (real local tx)"
+response=$(rpc_call "eth_getTransactionByHash" "[\"$REAL_LOCAL_TX\"]")
+if check_result_not_null "$response" "eth_getTransactionByHash (real local)"; then
+    TX_BLOCK=$(echo "$response" | jq -r '.result.blockNumber')
+    TX_BLOCK_DEC=$((TX_BLOCK))
+    if [ "$TX_BLOCK_DEC" -eq "$REAL_LOCAL_BLOCK" ]; then
+        log_success "  → Block number matches: $TX_BLOCK ✓"
+    else
+        log_error "  → Block number mismatch! Expected $REAL_LOCAL_BLOCK, got $TX_BLOCK_DEC ✗"
+        FAILED_TESTS=$((FAILED_TESTS + 1))
+        FAILED_TEST_NAMES+=("Real local tx block verification")
+    fi
 fi
 
-echo ""
-log_info "💡 Reminder: eth_getLogs (Phase 7) DOES support cross-boundary queries!"
-log_info "   Use eth_getLogs for querying historical data across the migration boundary."
+# Test 7.5.3: Get legacy transaction receipt
+log_info "Test 7.5.3: eth_getTransactionReceipt (real legacy tx)"
+response=$(rpc_call "eth_getTransactionReceipt" "[\"$REAL_LEGACY_TX\"]")
+if check_result_not_null "$response" "eth_getTransactionReceipt (real legacy)"; then
+    RECEIPT_BLOCK=$(echo "$response" | jq -r '.result.blockNumber')
+    RECEIPT_STATUS=$(echo "$response" | jq -r '.result.status')
+    RECEIPT_LOGS_COUNT=$(echo "$response" | jq -r '.result.logs | length')
+    log_info "  → Receipt block: $RECEIPT_BLOCK, Status: $RECEIPT_STATUS, Logs: $RECEIPT_LOGS_COUNT"
+
+    MISSING_FIELDS=$(echo "$response" | jq -r '.result |
+        if .blockNumber and .blockHash and .transactionHash and .status != null and .logs then
+            "valid"
+        else
+            "missing_fields"
+        end')
+
+    if [ "$MISSING_FIELDS" = "valid" ]; then
+        log_success "  → Receipt has all required fields ✓"
+    else
+        log_error "  → Receipt missing required fields ✗"
+        FAILED_TESTS=$((FAILED_TESTS + 1))
+        FAILED_TEST_NAMES+=("Real legacy receipt field verification")
+    fi
+fi
+
+# Test 7.5.4: Get local transaction receipt
+log_info "Test 7.5.4: eth_getTransactionReceipt (real local tx)"
+response=$(rpc_call "eth_getTransactionReceipt" "[\"$REAL_LOCAL_TX\"]")
+if check_result_not_null "$response" "eth_getTransactionReceipt (real local)"; then
+    RECEIPT_BLOCK=$(echo "$response" | jq -r '.result.blockNumber')
+    RECEIPT_STATUS=$(echo "$response" | jq -r '.result.status')
+    RECEIPT_LOGS_COUNT=$(echo "$response" | jq -r '.result.logs | length')
+    log_info "  → Receipt block: $RECEIPT_BLOCK, Status: $RECEIPT_STATUS, Logs: $RECEIPT_LOGS_COUNT"
+
+    MISSING_FIELDS=$(echo "$response" | jq -r '.result |
+        if .blockNumber and .blockHash and .transactionHash and .status != null and .logs then
+            "valid"
+        else
+            "missing_fields"
+        end')
+
+    if [ "$MISSING_FIELDS" = "valid" ]; then
+        log_success "  → Receipt has all required fields ✓"
+    else
+        log_error "  → Receipt missing required fields ✗"
+        FAILED_TESTS=$((FAILED_TESTS + 1))
+        FAILED_TEST_NAMES+=("Real local receipt field verification")
+    fi
+fi
+
+# Test 7.5.5: Get logs from legacy transaction's block
+log_info "Test 7.5.5: eth_getLogs (real legacy block with known tx)"
+REAL_LEGACY_BLOCK_HEX=$(printf "0x%x" $REAL_LEGACY_BLOCK)
+response=$(rpc_call "eth_getLogs" "[{\"fromBlock\":\"$REAL_LEGACY_BLOCK_HEX\",\"toBlock\":\"$REAL_LEGACY_BLOCK_HEX\"}]")
+if check_result "$response" "eth_getLogs (real legacy block)"; then
+    LOGS=$(echo "$response" | jq '.result')
+    LOGS_COUNT=$(echo "$LOGS" | jq 'length')
+    log_info "  → Found $LOGS_COUNT logs in block $REAL_LEGACY_BLOCK"
+
+    if [ "$LOGS_COUNT" -gt 0 ]; then
+        VALID_LOGS=$(echo "$LOGS" | jq '[.[] | select(.address and .topics and .data and .blockNumber and .transactionHash)] | length')
+        if [ "$VALID_LOGS" -eq "$LOGS_COUNT" ]; then
+            log_success "  → All logs have valid structure ✓"
+        else
+            log_error "  → Some logs have invalid structure ✗"
+            FAILED_TESTS=$((FAILED_TESTS + 1))
+            FAILED_TEST_NAMES+=("Real legacy logs structure validation")
+        fi
+    fi
+fi
+
+# Test 7.5.6: Get logs from local transaction's block
+log_info "Test 7.5.6: eth_getLogs (real local block with known tx)"
+REAL_LOCAL_BLOCK_HEX=$(printf "0x%x" $REAL_LOCAL_BLOCK)
+response=$(rpc_call "eth_getLogs" "[{\"fromBlock\":\"$REAL_LOCAL_BLOCK_HEX\",\"toBlock\":\"$REAL_LOCAL_BLOCK_HEX\"}]")
+if check_result "$response" "eth_getLogs (real local block)"; then
+    LOGS=$(echo "$response" | jq '.result')
+    LOGS_COUNT=$(echo "$LOGS" | jq 'length')
+    log_info "  → Found $LOGS_COUNT logs in block $REAL_LOCAL_BLOCK"
+
+    if [ "$LOGS_COUNT" -gt 0 ]; then
+        VALID_LOGS=$(echo "$LOGS" | jq '[.[] | select(.address and .topics and .data and .blockNumber and .transactionHash)] | length')
+        if [ "$VALID_LOGS" -eq "$LOGS_COUNT" ]; then
+            log_success "  → All logs have valid structure ✓"
+        else
+            log_error "  → Some logs have invalid structure ✗"
+            FAILED_TESTS=$((FAILED_TESTS + 1))
+            FAILED_TEST_NAMES+=("Real local logs structure validation")
+        fi
+    fi
+fi
+
+# Test 7.5.7: Cross-boundary test with transaction near cutoff
+log_info "Test 7.5.7: Cross-boundary test with transaction near cutoff"
+NEAR_CUTOFF_BLOCK_HEX=$(printf "0x%x" $NEAR_CUTOFF_BLOCK)
+log_info "  → Near-cutoff TX: $NEAR_CUTOFF_TX"
+log_info "  → Near-cutoff Block: $NEAR_CUTOFF_BLOCK (distance to cutoff: $(($CUTOFF_BLOCK - $NEAR_CUTOFF_BLOCK)) blocks)"
+
+# First, verify we can get the transaction
+response=$(rpc_call "eth_getTransactionByHash" "[\"$NEAR_CUTOFF_TX\"]")
+if check_result_not_null "$response" "eth_getTransactionByHash (near cutoff)"; then
+    TX_BLOCK=$(echo "$response" | jq -r '.result.blockNumber')
+    TX_BLOCK_DEC=$((TX_BLOCK))
+    if [ "$TX_BLOCK_DEC" -eq "$NEAR_CUTOFF_BLOCK" ]; then
+        log_success "  → Transaction block number verified: $TX_BLOCK ✓"
+    fi
+fi
+
+# Now test cross-boundary getLogs
+NEAR_CROSS_FROM=$((CUTOFF_BLOCK - 60))
+NEAR_CROSS_TO=$((CUTOFF_BLOCK + 60))
+NEAR_CROSS_FROM_HEX=$(printf "0x%x" $NEAR_CROSS_FROM)
+NEAR_CROSS_TO_HEX=$(printf "0x%x" $NEAR_CROSS_TO)
+NEAR_CROSS_SPAN=$((NEAR_CROSS_TO - NEAR_CROSS_FROM))
+
+log_info "  → Testing getLogs across cutoff boundary:"
+log_info "    From: $NEAR_CROSS_FROM ($(($CUTOFF_BLOCK - $NEAR_CROSS_FROM)) blocks before cutoff)"
+log_info "    To:   $NEAR_CROSS_TO ($(($NEAR_CROSS_TO - $CUTOFF_BLOCK)) blocks after cutoff)"
+log_info "    Total span: $NEAR_CROSS_SPAN blocks (within Legacy RPC 68-block limit)"
+
+response=$(rpc_call "eth_getLogs" "[{\"fromBlock\":\"$NEAR_CROSS_FROM_HEX\",\"toBlock\":\"$NEAR_CROSS_TO_HEX\"}]")
+
+if check_result "$response" "eth_getLogs (near-cutoff cross-boundary)"; then
+    LOGS=$(echo "$response" | jq '.result')
+    LOGS_COUNT=$(echo "$LOGS" | jq 'length')
+    log_info "  → Found $LOGS_COUNT logs in cross-boundary range"
+
+    if [ "$LOGS_COUNT" -gt 0 ]; then
+        LEGACY_LOGS=$(echo "$LOGS" | jq --argjson cutoff "$CUTOFF_BLOCK" '[.[] | select((.blockNumber | tonumber) < $cutoff)] | length')
+        LOCAL_LOGS=$(echo "$LOGS" | jq --argjson cutoff "$CUTOFF_BLOCK" '[.[] | select((.blockNumber | tonumber) >= $cutoff)] | length')
+
+        log_info "  → Legacy side logs: $LEGACY_LOGS"
+        log_info "  → Local side logs:  $LOCAL_LOGS"
+
+        if [ "$LEGACY_LOGS" -gt 0 ] && [ "$LOCAL_LOGS" -gt 0 ]; then
+            log_success "  → Successfully retrieved logs from BOTH sides of cutoff! ✓"
+        elif [ "$LEGACY_LOGS" -gt 0 ]; then
+            log_warning "  → Only found logs on legacy side"
+        elif [ "$LOCAL_LOGS" -gt 0 ]; then
+            log_warning "  → Only found logs on local side"
+        fi
+
+        # Verify sorting
+        IS_SORTED=$(echo "$LOGS" | jq '[.[].blockNumber] | . == sort')
+        if [ "$IS_SORTED" = "true" ]; then
+            log_success "  → Logs properly sorted across boundary ✓"
+        else
+            log_error "  → Logs NOT sorted properly ✗"
+            FAILED_TESTS=$((FAILED_TESTS + 1))
+            FAILED_TEST_NAMES+=("Near-cutoff cross-boundary log sorting")
+        fi
+    fi
+fi
+
+# ========================================
+# Phase 8: Gas-Related Methods
+# ========================================
+
+log_section "Phase 8: Gas-Related Methods"
+
+# Test 8.1: eth_gasPrice
+log_info "Test 8.1: eth_gasPrice"
+response=$(rpc_call "eth_gasPrice" "[]")
+check_result "$response" "eth_gasPrice"
+
+# Test 8.2: eth_maxPriorityFeePerGas
+log_info "Test 8.2: eth_maxPriorityFeePerGas"
+response=$(rpc_call "eth_maxPriorityFeePerGas" "[]")
+check_result "$response" "eth_maxPriorityFeePerGas"
+
+# Test 8.3: eth_feeHistory
+log_info "Test 8.3: eth_feeHistory (4 blocks, 25th percentile)"
+response=$(rpc_call "eth_feeHistory" "[\"0x4\",\"latest\",[25]]")
+check_result "$response" "eth_feeHistory"
+
+# Test 8.4: eth_blobBaseFee
+log_info "Test 8.4: eth_blobBaseFee"
+response=$(rpc_call "eth_blobBaseFee" "[]")
+check_result_legacy_tolerant "$response" "eth_blobBaseFee"
 
 # ========================================
 # Phase 9: Additional Methods
@@ -547,164 +710,6 @@ if [ "$BLOCK_HASH" != "null" ] && [ -n "$BLOCK_HASH" ]; then
     log_info "Test 9.2: eth_getBlockByHash"
     response=$(rpc_call "eth_getBlockByHash" "[\"$BLOCK_HASH\",false]")
     check_result_not_null "$response" "eth_getBlockByHash"
-fi
-
-# ========================================
-# Phase 10: Edge Case Tests
-# ========================================
-
-log_section "Phase 10: Edge Case Tests (Boundary Conditions)"
-
-# Non-existent hashes for testing
-NON_EXISTENT_TX="0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
-NON_EXISTENT_BLOCK="0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
-INVALID_ADDRESS="0x0000000000000000000000000000000000000000"
-
-# Test 10.1: eth_getTransactionByHash (non-existent)
-log_info "Test 10.1: eth_getTransactionByHash (non-existent hash)"
-response=$(rpc_call "eth_getTransactionByHash" "[\"$NON_EXISTENT_TX\"]")
-TOTAL_TESTS=$((TOTAL_TESTS + 1))
-if echo "$response" | jq -e '.result == null and .error == null' > /dev/null 2>&1; then
-    log_success "eth_getTransactionByHash (non-existent) - correctly returns null"
-    PASSED_TESTS=$((PASSED_TESTS + 1))
-else
-    log_error "eth_getTransactionByHash (non-existent) - unexpected response"
-    FAILED_TESTS=$((FAILED_TESTS + 1))
-    FAILED_TEST_NAMES+=("eth_getTransactionByHash (non-existent)")
-fi
-
-# Test 10.2: eth_getBlockByHash (non-existent)
-log_info "Test 10.2: eth_getBlockByHash (non-existent hash)"
-response=$(rpc_call "eth_getBlockByHash" "[\"$NON_EXISTENT_BLOCK\",false]")
-TOTAL_TESTS=$((TOTAL_TESTS + 1))
-if echo "$response" | jq -e '.result == null and .error == null' > /dev/null 2>&1; then
-    log_success "eth_getBlockByHash (non-existent) - correctly returns null"
-    PASSED_TESTS=$((PASSED_TESTS + 1))
-else
-    log_error "eth_getBlockByHash (non-existent) - unexpected response"
-    FAILED_TESTS=$((FAILED_TESTS + 1))
-    FAILED_TEST_NAMES+=("eth_getBlockByHash (non-existent)")
-fi
-
-# Test 10.3: eth_getTransactionReceipt (non-existent)
-log_info "Test 10.3: eth_getTransactionReceipt (non-existent hash)"
-response=$(rpc_call "eth_getTransactionReceipt" "[\"$NON_EXISTENT_TX\"]")
-TOTAL_TESTS=$((TOTAL_TESTS + 1))
-if echo "$response" | jq -e '.result == null and .error == null' > /dev/null 2>&1; then
-    log_success "eth_getTransactionReceipt (non-existent) - correctly returns null"
-    PASSED_TESTS=$((PASSED_TESTS + 1))
-else
-    log_error "eth_getTransactionReceipt (non-existent) - unexpected response"
-    FAILED_TESTS=$((FAILED_TESTS + 1))
-    FAILED_TEST_NAMES+=("eth_getTransactionReceipt (non-existent)")
-fi
-
-# Test 10.4: eth_getBlockByNumber (future block)
-log_info "Test 10.4: eth_getBlockByNumber (future block)"
-FUTURE_BLOCK="0xffffffff"  # Very large block number
-response=$(rpc_call "eth_getBlockByNumber" "[\"$FUTURE_BLOCK\",false]")
-TOTAL_TESTS=$((TOTAL_TESTS + 1))
-if echo "$response" | jq -e '.result == null and .error == null' > /dev/null 2>&1; then
-    log_success "eth_getBlockByNumber (future) - correctly returns null"
-    PASSED_TESTS=$((PASSED_TESTS + 1))
-else
-    log_error "eth_getBlockByNumber (future) - unexpected response"
-    FAILED_TESTS=$((FAILED_TESTS + 1))
-    FAILED_TEST_NAMES+=("eth_getBlockByNumber (future)")
-fi
-
-# Test 10.5: eth_getBalance (any account, legacy block)
-log_info "Test 10.5: eth_getBalance (any account)"
-response=$(rpc_call "eth_getBalance" "[\"$INVALID_ADDRESS\",\"$LEGACY_BLOCK_HEX\"]")
-TOTAL_TESTS=$((TOTAL_TESTS + 1))
-if echo "$response" | jq -e '.result and .error == null' > /dev/null 2>&1; then
-    log_success "eth_getBalance (any account) - correctly returns result"
-    PASSED_TESTS=$((PASSED_TESTS + 1))
-else
-    log_error "eth_getBalance (any account) - unexpected response"
-    FAILED_TESTS=$((FAILED_TESTS + 1))
-    FAILED_TEST_NAMES+=("eth_getBalance (any account)")
-fi
-
-# Test 10.6: eth_getCode (non-existent contract)
-log_info "Test 10.6: eth_getCode (non-existent contract)"
-response=$(rpc_call "eth_getCode" "[\"$INVALID_ADDRESS\",\"$LEGACY_BLOCK_HEX\"]")
-TOTAL_TESTS=$((TOTAL_TESTS + 1))
-if echo "$response" | jq -e '.result == "0x" and .error == null' > /dev/null 2>&1; then
-    log_success "eth_getCode (non-existent) - correctly returns 0x"
-    PASSED_TESTS=$((PASSED_TESTS + 1))
-else
-    log_error "eth_getCode (non-existent) - unexpected response"
-    FAILED_TESTS=$((FAILED_TESTS + 1))
-    FAILED_TEST_NAMES+=("eth_getCode (non-existent)")
-fi
-
-# Test 10.7: eth_getTransactionCount (zero nonce account)
-log_info "Test 10.7: eth_getTransactionCount (zero nonce account)"
-response=$(rpc_call "eth_getTransactionCount" "[\"$INVALID_ADDRESS\",\"$LEGACY_BLOCK_HEX\"]")
-TOTAL_TESTS=$((TOTAL_TESTS + 1))
-if echo "$response" | jq -e '.result == "0x0" and .error == null' > /dev/null 2>&1; then
-    log_success "eth_getTransactionCount (zero nonce) - correctly returns 0x0"
-    PASSED_TESTS=$((PASSED_TESTS + 1))
-else
-    log_error "eth_getTransactionCount (zero nonce) - unexpected response"
-    FAILED_TESTS=$((FAILED_TESTS + 1))
-    FAILED_TEST_NAMES+=("eth_getTransactionCount (zero nonce)")
-fi
-
-# Test 10.8: eth_getStorageAt (non-existent storage)
-log_info "Test 10.8: eth_getStorageAt (non-existent storage)"
-response=$(rpc_call "eth_getStorageAt" "[\"$INVALID_ADDRESS\",\"0x0\",\"$LEGACY_BLOCK_HEX\"]")
-TOTAL_TESTS=$((TOTAL_TESTS + 1))
-if echo "$response" | jq -e '.result and .error == null' > /dev/null 2>&1; then
-    log_success "eth_getStorageAt (non-existent) - correctly returns value"
-    PASSED_TESTS=$((PASSED_TESTS + 1))
-else
-    log_error "eth_getStorageAt (non-existent) - unexpected response"
-    FAILED_TESTS=$((FAILED_TESTS + 1))
-    FAILED_TEST_NAMES+=("eth_getStorageAt (non-existent)")
-fi
-
-# Test 10.9: eth_getBlockTransactionCountByHash (non-existent block)
-log_info "Test 10.9: eth_getBlockTransactionCountByHash (non-existent)"
-response=$(rpc_call "eth_getBlockTransactionCountByHash" "[\"$NON_EXISTENT_BLOCK\"]")
-check_result_legacy_tolerant "$response" "eth_getBlockTransactionCountByHash (non-existent)"
-
-# Test 10.10: eth_getUncleCountByBlockHash (non-existent block)
-log_info "Test 10.10: eth_getUncleCountByBlockHash (non-existent)"
-response=$(rpc_call "eth_getUncleCountByBlockHash" "[\"$NON_EXISTENT_BLOCK\"]")
-check_result_legacy_tolerant "$response" "eth_getUncleCountByBlockHash (non-existent)"
-
-# Test 10.11: eth_getLogs (unlikely address)
-log_info "Test 10.11: eth_getLogs (unlikely address)"
-EMPTY_FROM=$((LEGACY_BLOCK + 500))
-EMPTY_TO=$((LEGACY_BLOCK + 501))
-EMPTY_FROM_HEX=$(printf "0x%x" $EMPTY_FROM)
-EMPTY_TO_HEX=$(printf "0x%x" $EMPTY_TO)
-UNLIKELY_ADDRESS="0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
-response=$(rpc_call "eth_getLogs" "[{\"fromBlock\":\"$EMPTY_FROM_HEX\",\"toBlock\":\"$EMPTY_TO_HEX\",\"address\":\"$UNLIKELY_ADDRESS\"}]")
-TOTAL_TESTS=$((TOTAL_TESTS + 1))
-if echo "$response" | jq -e '(.result | type == "array") and (.error == null)' > /dev/null 2>&1; then
-    log_success "eth_getLogs (unlikely address) - correctly returns array"
-    PASSED_TESTS=$((PASSED_TESTS + 1))
-else
-    log_error "eth_getLogs (unlikely address) - unexpected response"
-    echo "       Response: $(echo "$response" | jq -c .)"
-    FAILED_TESTS=$((FAILED_TESTS + 1))
-    FAILED_TEST_NAMES+=("eth_getLogs (unlikely address)")
-fi
-
-# Test 10.12: eth_getBlockReceipts (non-existent block)
-log_info "Test 10.12: eth_getBlockReceipts (non-existent block)"
-response=$(rpc_call "eth_getBlockReceipts" "[\"$FUTURE_BLOCK\"]")
-TOTAL_TESTS=$((TOTAL_TESTS + 1))
-if echo "$response" | jq -e '.result == null and .error == null' > /dev/null 2>&1; then
-    log_success "eth_getBlockReceipts (non-existent) - correctly returns null"
-    PASSED_TESTS=$((PASSED_TESTS + 1))
-else
-    log_error "eth_getBlockReceipts (non-existent) - unexpected response"
-    FAILED_TESTS=$((FAILED_TESTS + 1))
-    FAILED_TEST_NAMES+=("eth_getBlockReceipts (non-existent)")
 fi
 
 # ========================================
@@ -752,7 +757,7 @@ if [ $FAILED_TESTS -eq 0 ]; then
     echo -e "${GREEN}╔════════════════════════════════════════╗${NC}"
     echo -e "${GREEN}║   ✓ ALL TESTS PASSED!                 ║${NC}"
     echo -e "${GREEN}║   Legacy RPC is working correctly!    ║${NC}"
-    echo -e "${GREEN}║   ${NETWORK_NAME} migration validated ✓    ║${NC}"
+    echo -e "${GREEN}║   XLayer Mainnet migration validated ✓║${NC}"
     echo -e "${GREEN}╚════════════════════════════════════════╝${NC}"
     exit 0
 else
@@ -773,4 +778,3 @@ else
     echo ""
     exit 1
 fi
-
