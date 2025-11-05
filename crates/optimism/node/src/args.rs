@@ -3,11 +3,12 @@
 //! clap [Args](clap::Args) for optimism rollup configuration
 
 use op_alloy_consensus::interop::SafetyLevel;
+use reth_node_core::args::XLayerArgs;
 use reth_optimism_txpool::supervisor::DEFAULT_SUPERVISOR_URL;
 use url::Url;
 
 /// Parameters for rollup configuration
-#[derive(Debug, Clone, PartialEq, Eq, clap::Args)]
+#[derive(Debug, Clone, PartialEq, clap::Args)]
 #[command(next_help_heading = "Rollup")]
 pub struct RollupArgs {
     /// Endpoint for the sequencer mempool (can be both HTTP and WS)
@@ -74,6 +75,10 @@ pub struct RollupArgs {
     /// block tag will use the pending state based on flashblocks.
     #[arg(long)]
     pub flashblocks_url: Option<Url>,
+
+    /// XLayer specific configuration
+    #[command(flatten)]
+    pub xlayer: XLayerArgs,
 }
 
 impl Default for RollupArgs {
@@ -90,6 +95,7 @@ impl Default for RollupArgs {
             historical_rpc: None,
             min_suggested_priority_fee: 1_000_000,
             flashblocks_url: None,
+            xlayer: XLayerArgs::default(),
         }
     }
 }

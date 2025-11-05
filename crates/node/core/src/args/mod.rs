@@ -68,5 +68,9 @@ pub use ress_args::RessArgs;
 mod era;
 pub use era::{DefaultEraHost, EraArgs, EraSourceArgs};
 
+/// XLayer configuration arguments
+mod xlayer;
+pub use xlayer::{XLayerArgs, XLayerGasPriceArgs};
+
 mod error;
 pub mod types;
