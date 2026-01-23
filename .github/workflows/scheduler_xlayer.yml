@@ -1,0 +1,723 @@
+name: X Layer Scheduled CI
+
+# Schedule daily runs at 2:00 PM Beijing Time (UTC+8)
+on:
+  schedule:
+    - cron: '0 6 * * *'   # 14:00 Beijing Time (UTC+8)
+  workflow_dispatch:      # Allow manual trigger
+
+# Ensure only one workflow runs at a time
+concurrency:
+  group: scheduler-xlayer-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  SEED: rustethereumethereumrust
+  RUST_BACKTRACE: 1
+
+jobs:
+  ##############################################################################
+  # Phase 0: Sync from Upstream
+  ##############################################################################
+
+  sync-upstream:
+    name: Sync from upstream (okx/reth)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: write  # Required for pushing merged changes
+      pull-requests: none
+      issues: none
+      packages: none
+    steps:
+      - name: Checkout current branch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref }}
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Configure Git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Add upstream remote
+        run: |
+          git remote add upstream https://github.com/okx/reth.git || true
+          git remote -v
+
+      - name: Fetch upstream
+        run: |
+          echo "Fetching from upstream okx/reth..."
+          git fetch upstream brendon/fix-ci-errors
+
+      - name: Merge upstream/brendon/fix-ci-errors into current branch
+        id: merge
+        continue-on-error: true
+        run: |
+          echo "Current branch: $(git branch --show-current)"
+          echo "Attempting to merge upstream/brendon/fix-ci-errors..."
+
+          if git merge --no-edit upstream/brendon/fix-ci-errors; then
+            echo "✅ Merge successful"
+            echo "merge_status=success" >> $GITHUB_OUTPUT
+          else
+            echo "❌ Merge conflict detected"
+            echo "merge_status=conflict" >> $GITHUB_OUTPUT
+            git merge --abort
+            exit 1
+          fi
+
+      - name: Push merged changes
+        if: steps.merge.outputs.merge_status == 'success'
+        run: |
+          echo "Pushing changes to origin..."
+          git push origin HEAD:${{ github.ref_name }}
+
+      - name: Generate sync summary
+        if: always()
+        run: |
+          echo "## 🔄 Upstream Sync Status" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Upstream:** https://github.com/okx/reth (brendon/fix-ci-errors branch)" >> $GITHUB_STEP_SUMMARY
+          echo "**Target Branch:** ${{ github.ref_name }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          if [[ "${{ steps.merge.outputs.merge_status }}" == "success" ]]; then
+            echo "✅ **Successfully synced from upstream**" >> $GITHUB_STEP_SUMMARY
+
+            # Show recent commits from upstream
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "### Recent Upstream Changes" >> $GITHUB_STEP_SUMMARY
+            git log --oneline --graph --decorate -10 >> $GITHUB_STEP_SUMMARY
+          else
+            echo "❌ **Merge conflict detected**" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "⚠️ Please resolve conflicts manually:" >> $GITHUB_STEP_SUMMARY
+            echo "1. Clone the repository" >> $GITHUB_STEP_SUMMARY
+            echo "2. Run: \`git remote add upstream https://github.com/okx/reth.git\`" >> $GITHUB_STEP_SUMMARY
+            echo "3. Run: \`git fetch upstream\`" >> $GITHUB_STEP_SUMMARY
+            echo "4. Run: \`git merge upstream/brendon/fix-ci-errors\`" >> $GITHUB_STEP_SUMMARY
+            echo "5. Resolve conflicts and push" >> $GITHUB_STEP_SUMMARY
+          fi
+
+      - name: Fail workflow if merge conflict
+        if: steps.merge.outputs.merge_status != 'success'
+        run: |
+          echo "::error::Merge conflict detected. Please resolve manually."
+          exit 1
+
+  ##############################################################################
+  # Phase 1: Test Suite
+  ##############################################################################
+
+  unit-tests:
+    needs: [sync-upstream]
+    name: Unit Tests - ${{ matrix.type }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - type: ethereum
+            args: --features "asm-keccak ethereum" --locked
+          - type: optimism
+            args: --features "asm-keccak" --locked --exclude reth --exclude reth-bench --exclude "example-*" --exclude "reth-ethereum-*" --exclude "*-ethereum"
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref }}
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Setup mold linker
+        uses: rui314/setup-mold@v1
+
+      - name: Cache cargo build
+        uses: Swatinem/rust-cache@v2
+        with:
+          cache-on-failure: true
+
+      - name: Install nextest
+        uses: taiki-e/install-action@nextest
+
+      - name: Run unit tests
+        run: |
+          cargo nextest run \
+            ${{ matrix.args }} --workspace \
+            --exclude ef-tests --no-tests=warn \
+            -E "!kind(test) and not binary(e2e_testsuite)"
+
+      - name: Generate test summary
+        if: always()
+        run: |
+          echo "## 🧪 Unit Tests - ${{ matrix.type }}" >> $GITHUB_STEP_SUMMARY
+          if [ $? -eq 0 ]; then
+            echo "✅ **All tests passed**" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "❌ **Some tests failed**" >> $GITHUB_STEP_SUMMARY
+          fi
+
+  integration-tests:
+    needs: [sync-upstream]
+    name: Integration Tests - ${{ matrix.network }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        network: ["ethereum", "optimism"]
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref }}
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Setup mold linker
+        uses: rui314/setup-mold@v1
+
+      - name: Install Geth
+        if: matrix.network == 'ethereum'
+        run: .github/assets/install_geth.sh
+
+      - name: Cache cargo build
+        uses: Swatinem/rust-cache@v2
+        with:
+          cache-on-failure: true
+
+      - name: Install nextest
+        uses: taiki-e/install-action@nextest
+
+      - name: Run integration tests (ethereum)
+        if: matrix.network == 'ethereum'
+        run: |
+          cargo nextest run \
+            --locked --features "asm-keccak ${{ matrix.network }}" \
+            --workspace --exclude ef-tests --exclude xlayer-e2e-test \
+            -E "kind(test) and not binary(e2e_testsuite)"
+
+      - name: Run integration tests (optimism)
+        if: matrix.network == 'optimism'
+        run: |
+          cargo nextest run \
+            --locked -p reth-optimism-node
+
+      - name: Generate test summary
+        if: always()
+        run: |
+          echo "## 🔗 Integration Tests - ${{ matrix.network }}" >> $GITHUB_STEP_SUMMARY
+          if [ $? -eq 0 ]; then
+            echo "✅ **All tests passed**" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "❌ **Some tests failed**" >> $GITHUB_STEP_SUMMARY
+          fi
+
+  e2e-tests:
+    needs: [sync-upstream]
+    name: E2E Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref }}
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo build
+        uses: Swatinem/rust-cache@v2
+        with:
+          cache-on-failure: true
+
+      - name: Install nextest
+        uses: taiki-e/install-action@nextest
+
+      - name: Run e2e tests
+        run: |
+          cargo nextest run \
+            --locked --features "asm-keccak" \
+            --workspace \
+            --exclude 'example-*' \
+            --exclude 'exex-subscription' \
+            --exclude 'reth-bench' \
+            --exclude 'ef-tests' \
+            --exclude 'op-reth' \
+            --exclude 'reth' \
+            -E 'binary(e2e_testsuite)'
+
+      - name: Generate test summary
+        if: always()
+        run: |
+          echo "## 🎯 E2E Tests" >> $GITHUB_STEP_SUMMARY
+          if [ $? -eq 0 ]; then
+            echo "✅ **All tests passed**" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "❌ **Some tests failed**" >> $GITHUB_STEP_SUMMARY
+          fi
+
+  ethereum-state-tests:
+    needs: [sync-upstream]
+    name: Ethereum State Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref }}
+
+      - name: Checkout ethereum/tests
+        uses: actions/checkout@v4
+        with:
+          repository: ethereum/tests
+          ref: 81862e4848585a438d64f911a19b3825f0f4cd95
+          path: testing/ef-tests/ethereum-tests
+          submodules: recursive
+          fetch-depth: 1
+
+      - name: Download & extract EEST fixtures
+        shell: bash
+        env:
+          EEST_TESTS_TAG: v4.5.0
+        run: |
+          set -euo pipefail
+          mkdir -p testing/ef-tests/execution-spec-tests
+          URL="https://github.com/ethereum/execution-spec-tests/releases/download/${EEST_TESTS_TAG}/fixtures_stable.tar.gz"
+          curl -L "$URL" | tar -xz --strip-components=1 -C testing/ef-tests/execution-spec-tests
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Setup mold linker
+        uses: rui314/setup-mold@v1
+
+      - name: Cache cargo build
+        uses: Swatinem/rust-cache@v2
+        with:
+          cache-on-failure: true
+
+      - name: Install nextest
+        uses: taiki-e/install-action@nextest
+
+      - name: Run EF tests
+        run: cargo nextest run --release -p ef-tests --features "asm-keccak ef-tests"
+
+      - name: Generate test summary
+        if: always()
+        run: |
+          echo "## ⚡ Ethereum State Tests" >> $GITHUB_STEP_SUMMARY
+          if [ $? -eq 0 ]; then
+            echo "✅ **All EF tests passed**" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "❌ **Some EF tests failed**" >> $GITHUB_STEP_SUMMARY
+          fi
+
+  ##############################################################################
+  # Phase 1.5: Code Quality & Security Audit
+  ##############################################################################
+
+  code-format:
+    needs: [sync-upstream]
+    name: Code Format Check
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref }}
+
+      - name: Install Rust nightly toolchain
+        uses: dtolnay/rust-toolchain@nightly
+        with:
+          components: rustfmt
+
+      - name: Check code formatting
+        run: |
+          echo "## 🎨 Code Format Check" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          if cargo +nightly fmt --all --check; then
+            echo "✅ **All code is properly formatted**" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "❌ **Code formatting issues detected**" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "Run the following command to fix formatting:" >> $GITHUB_STEP_SUMMARY
+            echo '```bash' >> $GITHUB_STEP_SUMMARY
+            echo 'make fmt' >> $GITHUB_STEP_SUMMARY
+            echo '```' >> $GITHUB_STEP_SUMMARY
+            exit 1
+          fi
+
+  security-audit:
+    needs: [sync-upstream]
+    name: Security Audit (cargo audit)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    continue-on-error: true  # Don't fail the entire workflow if vulnerabilities found
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref }}
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo build
+        uses: Swatinem/rust-cache@v2
+        with:
+          cache-on-failure: true
+
+      - name: Install cargo-audit
+        run: cargo install cargo-audit --locked
+
+      - name: Run cargo audit
+        id: audit
+        continue-on-error: true
+        run: |
+          echo "## 🔍 Security Audit Report" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          if cargo audit --json > audit-report.json 2>&1; then
+            echo "✅ **No known vulnerabilities found**" >> $GITHUB_STEP_SUMMARY
+            echo "audit_status=success" >> $GITHUB_OUTPUT
+          else
+            echo "⚠️ **Vulnerabilities detected**" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+
+            # Parse and display vulnerabilities
+            cargo audit 2>&1 | tee -a $GITHUB_STEP_SUMMARY
+
+            echo "audit_status=warning" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Upload audit report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: security-audit-report
+          path: audit-report.json
+          retention-days: 30
+
+  cargo-deny:
+    needs: [sync-upstream]
+    name: Cargo Deny Checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref }}
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo build
+        uses: Swatinem/rust-cache@v2
+        with:
+          cache-on-failure: true
+
+      - name: Install cargo-deny
+        run: cargo install cargo-deny --locked
+
+      - name: Run cargo deny (advisories)
+        continue-on-error: true
+        run: |
+          echo "## 🛡️ Cargo Deny - Security Advisories" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          if cargo deny check advisories 2>&1 | tee deny-advisories.log; then
+            echo "✅ **No security advisories issues**" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "⚠️ **Security advisory issues found**" >> $GITHUB_STEP_SUMMARY
+            echo '```' >> $GITHUB_STEP_SUMMARY
+            tail -n 50 deny-advisories.log >> $GITHUB_STEP_SUMMARY
+            echo '```' >> $GITHUB_STEP_SUMMARY
+          fi
+
+      - name: Run cargo deny (licenses)
+        continue-on-error: true
+        run: |
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "## 📜 Cargo Deny - License Compliance" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          if cargo deny check licenses 2>&1 | tee deny-licenses.log; then
+            echo "✅ **All licenses compliant**" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "⚠️ **License compliance issues found**" >> $GITHUB_STEP_SUMMARY
+            echo '```' >> $GITHUB_STEP_SUMMARY
+            tail -n 50 deny-licenses.log >> $GITHUB_STEP_SUMMARY
+            echo '```' >> $GITHUB_STEP_SUMMARY
+          fi
+
+      - name: Run cargo deny (bans)
+        continue-on-error: true
+        run: |
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "## 🚫 Cargo Deny - Banned Crates" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          if cargo deny check bans 2>&1 | tee deny-bans.log; then
+            echo "✅ **No banned crates detected**" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "⚠️ **Banned crates or duplicate versions found**" >> $GITHUB_STEP_SUMMARY
+            echo '```' >> $GITHUB_STEP_SUMMARY
+            tail -n 50 deny-bans.log >> $GITHUB_STEP_SUMMARY
+            echo '```' >> $GITHUB_STEP_SUMMARY
+          fi
+
+      - name: Run cargo deny (sources)
+        continue-on-error: true
+        run: |
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "## 📦 Cargo Deny - Dependency Sources" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          if cargo deny check sources 2>&1 | tee deny-sources.log; then
+            echo "✅ **All dependency sources approved**" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "⚠️ **Unapproved dependency sources found**" >> $GITHUB_STEP_SUMMARY
+            echo '```' >> $GITHUB_STEP_SUMMARY
+            tail -n 50 deny-sources.log >> $GITHUB_STEP_SUMMARY
+            echo '```' >> $GITHUB_STEP_SUMMARY
+          fi
+
+      - name: Upload deny reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cargo-deny-reports
+          path: deny-*.log
+          retention-days: 30
+
+  license-compliance:
+    needs: [sync-upstream]
+    name: License Compliance Report
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref }}
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo build
+        uses: Swatinem/rust-cache@v2
+        with:
+          cache-on-failure: true
+
+      - name: Install cargo-license
+        run: cargo install cargo-license --locked
+
+      - name: Generate license report
+        run: |
+          echo "## 📋 Dependency License Report" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          # Generate full report
+          cargo license --json > licenses.json
+          cargo license --tsv > licenses.tsv
+
+          # Summary by license type
+          echo "### License Distribution" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| License | Count |" >> $GITHUB_STEP_SUMMARY
+          echo "|---------|-------|" >> $GITHUB_STEP_SUMMARY
+
+          cargo license --tsv | tail -n +2 | cut -f2 | sort | uniq -c | sort -rn | while read count license; do
+            echo "| $license | $count |" >> $GITHUB_STEP_SUMMARY
+          done
+
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "✅ **Full license report generated**" >> $GITHUB_STEP_SUMMARY
+
+      - name: Upload license reports
+        uses: actions/upload-artifact@v4
+        with:
+          name: license-reports
+          path: |
+            licenses.json
+            licenses.tsv
+          retention-days: 30
+
+  ##############################################################################
+  # Phase 2: Summary & Notification,
+  ##############################################################################
+
+  summary:
+    name: Generate Summary Report
+    runs-on: ubuntu-latest
+    needs:
+      - sync-upstream
+      - unit-tests
+      - integration-tests
+      - e2e-tests
+      - ethereum-state-tests
+      - code-format
+      - security-audit
+      - cargo-deny
+      - license-compliance
+    if: always()
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref }}
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: reports
+
+      - name: Generate comprehensive summary
+        run: |
+          echo "# 📊 X Layer Scheduled CI Report" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Date:** $(date '+%Y-%m-%d %H:%M:%S UTC')" >> $GITHUB_STEP_SUMMARY
+          echo "**Commit:** ${{ github.sha }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Branch:** ${{ github.ref_name }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          echo "## 🔍 Results Overview" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Category | Status |" >> $GITHUB_STEP_SUMMARY
+          echo "|----------|--------|" >> $GITHUB_STEP_SUMMARY
+
+          # Upstream Sync
+          if [[ "${{ needs.sync-upstream.result }}" == "success" ]]; then
+            echo "| Upstream Sync | ✅ Passed |" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "| Upstream Sync | ❌ Failed (Conflict) |" >> $GITHUB_STEP_SUMMARY
+          fi
+
+          # Unit Tests
+          if [[ "${{ needs.unit-tests.result }}" == "success" ]]; then
+            echo "| Unit Tests | ✅ Passed |" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "| Unit Tests | ❌ Failed |" >> $GITHUB_STEP_SUMMARY
+          fi
+
+          # Integration Tests
+          if [[ "${{ needs.integration-tests.result }}" == "success" ]]; then
+            echo "| Integration Tests | ✅ Passed |" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "| Integration Tests | ❌ Failed |" >> $GITHUB_STEP_SUMMARY
+          fi
+
+          # E2E Tests
+          if [[ "${{ needs.e2e-tests.result }}" == "success" ]]; then
+            echo "| E2E Tests | ✅ Passed |" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "| E2E Tests | ❌ Failed |" >> $GITHUB_STEP_SUMMARY
+          fi
+
+          # EF Tests
+          if [[ "${{ needs.ethereum-state-tests.result }}" == "success" ]]; then
+            echo "| Ethereum State Tests | ✅ Passed |" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "| Ethereum State Tests | ❌ Failed |" >> $GITHUB_STEP_SUMMARY
+          fi
+
+          # Code Format
+          if [[ "${{ needs.code-format.result }}" == "success" ]]; then
+            echo "| Code Format | ✅ Passed |" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "| Code Format | ❌ Failed |" >> $GITHUB_STEP_SUMMARY
+          fi
+
+          # Security Audit
+          if [[ "${{ needs.security-audit.result }}" == "success" ]]; then
+            echo "| Security Audit | ✅ Passed |" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "| Security Audit | ⚠️ Warning |" >> $GITHUB_STEP_SUMMARY
+          fi
+
+          # Cargo Deny
+          if [[ "${{ needs.cargo-deny.result }}" == "success" ]]; then
+            echo "| Cargo Deny | ✅ Passed |" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "| Cargo Deny | ⚠️ Warning |" >> $GITHUB_STEP_SUMMARY
+          fi
+
+          # License Compliance
+          if [[ "${{ needs.license-compliance.result }}" == "success" ]]; then
+            echo "| License Compliance | ✅ Passed |" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "| License Compliance | ❌ Failed |" >> $GITHUB_STEP_SUMMARY
+          fi
+
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          # Overall Status (test failures only, audit failures don't affect overall status)
+          if [[ "${{ needs.sync-upstream.result }}" == "success" ]] && \
+             [[ "${{ needs.unit-tests.result }}" == "success" ]] && \
+             [[ "${{ needs.integration-tests.result }}" == "success" ]] && \
+             [[ "${{ needs.e2e-tests.result }}" == "success" ]] && \
+             [[ "${{ needs.ethereum-state-tests.result }}" == "success" ]] && \
+             [[ "${{ needs.code-format.result }}" == "success" ]]; then
+            echo "## ✅ Overall Status: SUCCESS" >> $GITHUB_STEP_SUMMARY
+            echo "all_passed" > status.txt
+          else
+            echo "## ❌ Overall Status: FAILED" >> $GITHUB_STEP_SUMMARY
+            echo "some_failed" > status.txt
+          fi
+
+          # Security Status (displayed separately)
+          echo "" >> $GITHUB_STEP_SUMMARY
+          if [[ "${{ needs.security-audit.result }}" == "success" ]] && \
+             [[ "${{ needs.cargo-deny.result }}" == "success" ]] && \
+             [[ "${{ needs.license-compliance.result }}" == "success" ]]; then
+            echo "### 🔒 Security Status: ALL CLEAR" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "### ⚠️ Security Status: WARNINGS DETECTED" >> $GITHUB_STEP_SUMMARY
+            echo "Please review security audit reports in artifacts." >> $GITHUB_STEP_SUMMARY
+          fi
+
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "---" >> $GITHUB_STEP_SUMMARY
+          echo "View detailed logs: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}" >> $GITHUB_STEP_SUMMARY
+
+      - name: Upload summary
+        uses: actions/upload-artifact@v4
+        with:
+          name: ci-summary
+          path: status.txt
+          retention-days: 30
+
+
+  
